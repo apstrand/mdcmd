@@ -2,6 +2,7 @@ import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import FileBrowser from "./components/FileBrowser";
 import MarkdownEditor from "./components/MarkdownEditor";
+import MediaViewer from "./components/MediaViewer";
 import { FileCode, Loader2 } from "lucide-react";
 
 export default function App() {
@@ -10,8 +11,19 @@ export default function App() {
   const [fileContent, setFileContent] = useState<string>("");
   const [isLoadingFile, setIsLoadingFile] = useState(false);
 
-  // Load a file's content from the local disk
+  // Check if a file is an image or video
+  const isMediaFile = (path: string) => {
+    return /\.(png|jpe?g|gif|webp|svg|bmp|ico|mp4|webm|ogg|mov|mkv)$/i.test(path);
+  };
+
+  // Load a file's content from local disk
   const handleSelectFile = async (filePath: string) => {
+    if (isMediaFile(filePath)) {
+      setSelectedFile(filePath);
+      setFileContent("");
+      return;
+    }
+
     setIsLoadingFile(true);
     try {
       const content = await invoke<string>("read_file_content", { path: filePath });
@@ -32,7 +44,6 @@ export default function App() {
         path: selectedFile,
         content,
       });
-      // Update our local state to match the saved content
       setFileContent(content);
     } catch (err) {
       alert(`Error saving file: ${err}`);
@@ -50,7 +61,7 @@ export default function App() {
         onSelectFile={handleSelectFile}
       />
 
-      {/* Editor or Landing State */}
+      {/* Editor, Viewer, or Landing State */}
       <div style={{ flexGrow: 1, display: "flex", height: "100%", overflow: "hidden" }}>
         {isLoadingFile ? (
           <div className="no-file-selected">
@@ -58,17 +69,21 @@ export default function App() {
             <p>Loading file content...</p>
           </div>
         ) : selectedFile ? (
-          <MarkdownEditor
-            filePath={selectedFile}
-            initialContent={fileContent}
-            onSave={handleSaveFile}
-          />
+          isMediaFile(selectedFile) ? (
+            <MediaViewer filePath={selectedFile} />
+          ) : (
+            <MarkdownEditor
+              filePath={selectedFile}
+              initialContent={fileContent}
+              onSave={handleSaveFile}
+            />
+          )
         ) : (
           <div className="no-file-selected">
             <FileCode className="no-file-icon text-accent" style={{ width: "64px", height: "64px" }} />
             <h2 style={{ margin: "0 0 8px 0", fontWeight: 600, fontSize: "20px" }}>No File Open</h2>
             <p style={{ margin: 0, fontSize: "14px", opacity: 0.8, maxWidth: "320px" }}>
-              Select a Markdown (.md) file from the browser sidebar to start editing. Use Cmd+S/Ctrl+S to save.
+              Select a Markdown (.md), image, or video file from the browser sidebar to open. Use Cmd+S/Ctrl+S to save markdown.
             </p>
           </div>
         )}

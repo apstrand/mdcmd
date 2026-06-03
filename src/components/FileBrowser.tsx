@@ -8,6 +8,8 @@ import {
   AlertCircle,
   Pin,
   X,
+  Image,
+  Video,
 } from "lucide-react";
 
 interface FileEntry {
@@ -270,6 +272,10 @@ export default function FileBrowser({
               ) : (
                 entries.map((entry) => {
                   const isMarkdown = entry.name.toLowerCase().endsWith(".md");
+                  const isImage = /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(entry.name);
+                  const isVideo = /\.(mp4|webm|ogg|mov|mkv)$/i.test(entry.name);
+                  const isSelectable = isMarkdown || isImage || isVideo;
+                  
                   const isSelected = selectedFile === entry.path;
                   const isPinned = pinnedWorkspaces.includes(entry.path);
                   
@@ -280,18 +286,22 @@ export default function FileBrowser({
                       onClick={() => {
                         if (entry.is_dir) {
                           setCurrentPath(entry.path);
-                        } else if (isMarkdown) {
+                        } else if (isSelectable) {
                           onSelectFile(entry.path);
                         }
                       }}
                       style={{
-                        opacity: !entry.is_dir && !isMarkdown ? 0.45 : 1,
-                        cursor: !entry.is_dir && !isMarkdown ? "default" : "pointer",
+                        opacity: !entry.is_dir && !isSelectable ? 0.45 : 1,
+                        cursor: !entry.is_dir && !isSelectable ? "default" : "pointer",
                       }}
                     >
                       <span className="file-item-icon">
                         {entry.is_dir ? (
                           <Folder style={{ width: "16px", height: "16px", fill: "var(--text-secondary)", opacity: 0.8 }} />
+                        ) : isImage ? (
+                          <Image style={{ width: "16px", height: "16px" }} />
+                        ) : isVideo ? (
+                          <Video style={{ width: "16px", height: "16px" }} />
                         ) : (
                           <FileText style={{ width: "16px", height: "16px" }} />
                         )}
