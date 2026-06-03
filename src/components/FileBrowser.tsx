@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   Folder,
@@ -37,9 +37,12 @@ export default function FileBrowser({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Keyboard navigation focus indexes
-  const [focusedWorkspaceIndex, setFocusedWorkspaceIndex] = useState<number>(-1);
-  const [focusedEntryIndex, setFocusedEntryIndex] = useState<number>(-1);
+  const sidebarRef = useRef<HTMLDivElement>(null);
+
+  // Active section tracking: "workspace" or "folders"
+  const [activeSection, setActiveSection] = useState<"workspace" | "folders">("folders");
+  const [focusedWorkspaceIndex, setFocusedWorkspaceIndex] = useState<number>(0);
+  const [focusedEntryIndex, setFocusedEntryIndex] = useState<number>(0);
 
   // Persistent workspace pane height percentage (default 25%)
   const [workspaceHeightPercent, setWorkspaceHeightPercent] = useState<number>(() => {
@@ -54,6 +57,11 @@ export default function FileBrowser({
   useEffect(() => {
     localStorage.setItem("tauri-markdown-workspace-ratio", String(workspaceHeightPercent));
   }, [workspaceHeightPercent]);
+
+  // Focus sidebar on mount
+  useEffect(() => {
+    sidebarRef.current?.focus();
+  }, []);
 
   // Drag resizing for workspace section height
   const startSectionResize = (mouseDownEvent: React.MouseEvent) => {
@@ -92,35 +100,54 @@ export default function FileBrowser({
     localStorage.setItem("tauri-markdown-workspaces", JSON.stringify(pinnedWorkspaces));
   }, [pinnedWorkspaces]);
 
-  // Reset focus index when directories change
+  // Sync folders focus bounds when entries change
   useEffect(() => {
-    setFocusedEntryIndex(-1);
-  }, [entries]);
-
-  // Reset workspace focus index on changes
-  useEffect(() => {
-    setFocusedWorkspaceIndex(-1);
-  }, [pinnedWorkspaces]);
-
-  // Scroll focused entry into view
-  useEffect(() => {
-    if (focusedEntryIndex >= 0) {
-      const el = document.querySelector(`.folders .file-item:nth-child(${focusedEntryIndex + 1})`);
-      if (el) {
-        el.scrollIntoView({ block: "nearest" });
+    if (entries.length === 0) {
+      setFocusedEntryIndex(-1);
+      if (activeSection === "folders" && pinnedWorkspaces.length > 0) {
+        setActiveSection("workspace");
+        setFocusedWorkspaceIndex(pinnedWorkspaces.length - 1);
+      }
+    } else {
+      if (focusedEntryIndex < 0 || focusedEntryIndex >= entries.length) {
+        setFocusedEntryIndex(0);
       }
     }
-  }, [focusedEntryIndex]);
+  }, [entries, activeSection, pinnedWorkspaces.length]);
 
-  // Scroll focused workspace folder into view
+  // Sync workspaces focus bounds when pinned folders change
   useEffect(() => {
-    if (focusedWorkspaceIndex >= 0) {
-      const el = document.querySelector(`.workspace .workspace-item:nth-child(${focusedWorkspaceIndex + 1})`);
-      if (el) {
-        el.scrollIntoView({ block: "nearest" });
+    if (pinnedWorkspaces.length === 0) {
+      setFocusedWorkspaceIndex(-1);
+      if (activeSection === "workspace") {
+        setActiveSection("folders");
+        setFocusedEntryIndex(0);
+      }
+    } else {
+      if (focusedWorkspaceIndex < 0 || focusedWorkspaceIndex >= pinnedWorkspaces.length) {
+        setFocusedWorkspaceIndex(0);
       }
     }
-  }, [focusedWorkspaceIndex]);
+  }, [pinnedWorkspaces, activeSection]);
+
+  // Sync folders focus index with selectedFile when entries or selectedFile changes
+  useEffect(() => {
+    if (selectedFile && entries.length > 0) {
+      const index = entries.findIndex((entry) => entry.path === selectedFile);
+      if (index !== -1) {
+        setFocusedEntryIndex(index);
+        setActiveSection("folders");
+      }
+    }
+  }, [selectedFile, entries]);
+
+  // Scroll focused entry or workspace folder into view
+  useEffect(() => {
+    const el = sidebarRef.current?.querySelector(".keyboard-focused");
+    if (el) {
+      el.scrollIntoView({ block: "nearest" });
+    }
+  }, [focusedEntryIndex, focusedWorkspaceIndex, activeSection]);
 
   // Initialize path to home directory if empty
   useEffect(() => {
@@ -223,61 +250,75 @@ export default function FileBrowser({
     setPinnedWorkspaces(pinnedWorkspaces.filter((p) => p !== path));
   };
 
-  // Keyboard navigation for folders list
-  const handleFoldersKeyDown = (e: React.KeyboardEvent) => {
-    if (entries.length === 0) return;
+  // Central keyboard navigation for the entire sidebar
+  const handleSidebarKeyDown = (e: React.KeyboardEvent) => {
+    if (activeSection === "workspace") {
+      if (pinnedWorkspaces.length === 0) return;
 
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setFocusedEntryIndex((prev) => (prev < entries.length - 1 ? prev + 1 : prev));
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setFocusedEntryIndex((prev) => (prev > 0 ? prev - 1 : 0));
-    } else if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      const index = focusedEntryIndex >= 0 ? focusedEntryIndex : 0;
-      if (index >= 0 && index < entries.length) {
-        const entry = entries[index];
-        const isMarkdown = entry.name.toLowerCase().endsWith(".md") || entry.name.toLowerCase().endsWith(".qmd");
-        const isImage = /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(entry.name);
-        const isVideo = /\.(mp4|webm|ogg|mov|mkv)$/i.test(entry.name);
-        const isSelectable = isMarkdown || isImage || isVideo;
-        
-        if (entry.is_dir) {
-          setCurrentPath(entry.path);
-        } else if (isSelectable) {
-          onSelectFile(entry.path);
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        if (focusedWorkspaceIndex < pinnedWorkspaces.length - 1) {
+          setFocusedWorkspaceIndex((prev) => prev + 1);
+        } else if (entries.length > 0) {
+          setActiveSection("folders");
+          setFocusedEntryIndex(0);
+        }
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setFocusedWorkspaceIndex((prev) => (prev > 0 ? prev - 1 : 0));
+      } else if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        const index = focusedWorkspaceIndex >= 0 ? focusedWorkspaceIndex : 0;
+        if (index >= 0 && index < pinnedWorkspaces.length) {
+          setCurrentPath(pinnedWorkspaces[index]);
         }
       }
-    }
-  };
+    } else if (activeSection === "folders") {
+      if (entries.length === 0) return;
 
-  // Keyboard navigation for workspaces list
-  const handleWorkspaceKeyDown = (e: React.KeyboardEvent) => {
-    if (pinnedWorkspaces.length === 0) return;
-
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setFocusedWorkspaceIndex((prev) => (prev < pinnedWorkspaces.length - 1 ? prev + 1 : prev));
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setFocusedWorkspaceIndex((prev) => (prev > 0 ? prev - 1 : 0));
-    } else if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      const index = focusedWorkspaceIndex >= 0 ? focusedWorkspaceIndex : 0;
-      if (index >= 0 && index < pinnedWorkspaces.length) {
-        setCurrentPath(pinnedWorkspaces[index]);
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setFocusedEntryIndex((prev) => (prev < entries.length - 1 ? prev + 1 : prev));
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        if (focusedEntryIndex > 0) {
+          setFocusedEntryIndex((prev) => prev - 1);
+        } else if (pinnedWorkspaces.length > 0) {
+          setActiveSection("workspace");
+          setFocusedWorkspaceIndex(pinnedWorkspaces.length - 1);
+        }
+      } else if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        const index = focusedEntryIndex >= 0 ? focusedEntryIndex : 0;
+        if (index >= 0 && index < entries.length) {
+          const entry = entries[index];
+          const isMarkdown = entry.name.toLowerCase().endsWith(".md") || entry.name.toLowerCase().endsWith(".qmd");
+          const isImage = /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(entry.name);
+          const isVideo = /\.(mp4|webm|ogg|mov|mkv)$/i.test(entry.name);
+          const isSelectable = isMarkdown || isImage || isVideo;
+          
+          if (entry.is_dir) {
+            setCurrentPath(entry.path);
+          } else if (isSelectable) {
+            onSelectFile(entry.path);
+          }
+        }
       }
     }
   };
 
   return (
     <div
+      ref={sidebarRef}
       className="sidebar"
+      tabIndex={0}
+      onKeyDown={handleSidebarKeyDown}
+      onClick={() => sidebarRef.current?.focus()}
       style={{
         width: `${width}px`,
         minWidth: `${width}px`,
         maxWidth: `${width}px`,
+        outline: "none", // Prevent default blue focus outline on sidebar
       }}
     >
       <div className="sidebar-header">
@@ -288,6 +329,9 @@ export default function FileBrowser({
       {/* Workspaces Section (Upper Sidebar Pane) */}
       <div
         className="sidebar-section workspace"
+        onClick={() => {
+          setActiveSection("workspace");
+        }}
         style={{
           height: `${workspaceHeightPercent}%`,
           flex: "none",
@@ -305,22 +349,15 @@ export default function FileBrowser({
               No pinned workspace folders.
             </div>
           ) : (
-            <div
-              className="workspace-list"
-              tabIndex={0}
-              onKeyDown={handleWorkspaceKeyDown}
-              onFocus={() => {
-                if (focusedWorkspaceIndex === -1) setFocusedWorkspaceIndex(0);
-              }}
-              onBlur={() => setFocusedWorkspaceIndex(-1)}
-            >
+            <div className="workspace-list">
               {pinnedWorkspaces.map((path, index) => {
-                const isFocused = focusedWorkspaceIndex === index;
+                const isFocused = activeSection === "workspace" && focusedWorkspaceIndex === index;
                 return (
                   <div
                     key={path}
                     className={`workspace-item ${isFocused ? "keyboard-focused" : ""}`}
                     onClick={() => {
+                      setActiveSection("workspace");
                       setFocusedWorkspaceIndex(index);
                       setCurrentPath(path);
                     }}
@@ -336,9 +373,12 @@ export default function FileBrowser({
                     <div className="workspace-item-actions">
                       <button
                         className="workspace-action-btn"
+                        tabIndex={-1}
+                        onMouseDown={(e) => e.preventDefault()}
                         onClick={(e) => {
                           e.stopPropagation();
                           handleUnpin(path);
+                          sidebarRef.current?.focus();
                         }}
                         title="Unpin folder"
                       >
@@ -357,7 +397,12 @@ export default function FileBrowser({
       <div className="section-resizer" onMouseDown={startSectionResize} />
 
       {/* Folders Section (Lower Sidebar Pane) */}
-      <div className="sidebar-section folders">
+      <div
+        className="sidebar-section folders"
+        onClick={() => {
+          setActiveSection("folders");
+        }}
+      >
         <div className="sidebar-subheader">
           <span className="sidebar-section-title">
             <Folder className="w-3.5 h-3.5 text-secondary" />
@@ -366,12 +411,15 @@ export default function FileBrowser({
           {currentPath && (
             <button
               className="file-action-btn"
+              tabIndex={-1}
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => {
                 if (pinnedWorkspaces.includes(currentPath)) {
                   handleUnpin(currentPath);
                 } else {
                   handlePin(currentPath);
                 }
+                sidebarRef.current?.focus();
               }}
               title={pinnedWorkspaces.includes(currentPath) ? "Unpin current folder" : "Pin current folder"}
               style={{ opacity: 0.8 }}
@@ -389,7 +437,12 @@ export default function FileBrowser({
           <div style={{ display: "flex", gap: "6px", marginBottom: "8px" }}>
             <button
               className="nav-button"
-              onClick={handleGoUp}
+              tabIndex={-1}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                handleGoUp();
+                sidebarRef.current?.focus();
+              }}
               disabled={!canGoUp() || loading}
               title="Go Up"
             >
@@ -414,15 +467,7 @@ export default function FileBrowser({
           )}
 
           {!loading && !error && (
-            <div
-              className="file-list"
-              tabIndex={0}
-              onKeyDown={handleFoldersKeyDown}
-              onFocus={() => {
-                if (focusedEntryIndex === -1) setFocusedEntryIndex(0);
-              }}
-              onBlur={() => setFocusedEntryIndex(-1)}
-            >
+            <div className="file-list">
               {entries.length === 0 ? (
                 <div style={{ padding: "16px", textAlign: "center", fontSize: "12px", color: "var(--text-secondary)" }}>
                   Empty Directory
@@ -436,13 +481,14 @@ export default function FileBrowser({
                   
                   const isSelected = selectedFile === entry.path;
                   const isPinned = pinnedWorkspaces.includes(entry.path);
-                  const isFocused = focusedEntryIndex === index;
+                  const isFocused = activeSection === "folders" && focusedEntryIndex === index;
                   
                   return (
                     <div
                       key={entry.path}
                       className={`file-item ${isSelected ? "selected" : ""} ${isFocused ? "keyboard-focused" : ""}`}
                       onClick={() => {
+                        setActiveSection("folders");
                         setFocusedEntryIndex(index);
                         if (entry.is_dir) {
                           setCurrentPath(entry.path);
@@ -481,6 +527,8 @@ export default function FileBrowser({
                         <div className="file-item-actions">
                           <button
                             className={`file-action-btn ${isPinned ? "pinned" : ""}`}
+                            tabIndex={-1}
+                            onMouseDown={(e) => e.preventDefault()}
                             onClick={(e) => {
                               e.stopPropagation();
                               if (isPinned) {
@@ -488,11 +536,12 @@ export default function FileBrowser({
                               } else {
                                 handlePin(entry.path);
                               }
+                              sidebarRef.current?.focus();
                             }}
                             title={isPinned ? "Remove from Workspaces" : "Pin to Workspaces"}
                           >
                             <Pin
-                              className={`w-3.5 h-3.5 ${isPinned ? "pinned text-accent" : ""}`}
+                              className="w-3.5 h-3.5"
                               style={{
                                 transform: isPinned ? "none" : "rotate(45deg)",
                                 fill: isPinned ? "var(--accent)" : "none",

@@ -147,10 +147,19 @@ body {
   outline: none;
 }
 
-.file-item.keyboard-focused,
-.workspace-item.keyboard-focused {
+.sidebar:focus-within .file-item.keyboard-focused,
+.sidebar:focus-within .workspace-item.keyboard-focused {
   background-color: var(--bg-tertiary);
   outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* Inactive focus style when sidebar is not active */
+.sidebar:not(:focus-within) .file-item.keyboard-focused,
+.sidebar:not(:focus-within) .workspace-item.keyboard-focused {
+  background-color: var(--bg-tertiary);
+  outline: 1px dashed var(--border);
+  outline-offset: -1px;
 }
 
 .sidebar-subheader {
