@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import FileBrowser from "./components/FileBrowser";
 import MarkdownEditor from "./components/MarkdownEditor";
@@ -10,6 +10,37 @@ export default function App() {
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState<string>("");
   const [isLoadingFile, setIsLoadingFile] = useState(false);
+
+  // Persistent sidebar width state
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem("tauri-markdown-sidebar-width");
+      return saved ? parseInt(saved, 10) : 260;
+    } catch {
+      return 260;
+    }
+  });
+
+  useEffect(() => {
+    localStorage.setItem("tauri-markdown-sidebar-width", String(sidebarWidth));
+  }, [sidebarWidth]);
+
+  // Handle drag resizing for the sidebar
+  const startSidebarResize = (mouseDownEvent: React.MouseEvent) => {
+    mouseDownEvent.preventDefault();
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const newWidth = Math.max(180, Math.min(450, moveEvent.clientX));
+      setSidebarWidth(newWidth);
+    };
+
+    const handleMouseUp = () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+  };
 
   // Check if a file is an image or video
   const isMediaFile = (path: string) => {
@@ -59,7 +90,11 @@ export default function App() {
         setCurrentPath={setCurrentPath}
         selectedFile={selectedFile}
         onSelectFile={handleSelectFile}
+        width={sidebarWidth}
       />
+
+      {/* Vertical Drag Resizer Handle */}
+      <div className="sidebar-resizer" onMouseDown={startSidebarResize} />
 
       {/* Editor, Viewer, or Landing State */}
       <div style={{ flexGrow: 1, display: "flex", height: "100%", overflow: "hidden" }}>

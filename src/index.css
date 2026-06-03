@@ -66,6 +66,16 @@ body {
   background-color: var(--bg-primary);
 }
 
+/* Sidebar Styling */
+.sidebar {
+  border-right: 1px solid var(--border);
+  background-color: var(--bg-secondary);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
 .sidebar-header {
   padding: 10px 12px;
   font-size: 12px;
@@ -88,14 +98,59 @@ body {
 }
 
 .sidebar-section.workspace {
-  flex: 1;
   border-bottom: 1px solid var(--border);
-  min-height: 160px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .sidebar-section.folders {
-  flex: 1.5;
-  min-height: 200px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex-grow: 1;
+}
+
+/* Drag Resizers */
+.sidebar-resizer {
+  width: 4px;
+  min-width: 4px;
+  cursor: col-resize;
+  background-color: transparent;
+  transition: background-color 0.2s ease;
+  z-index: 10;
+  align-self: stretch;
+}
+
+.sidebar-resizer:hover,
+.sidebar-resizer:active {
+  background-color: var(--accent);
+}
+
+.section-resizer {
+  height: 4px;
+  min-height: 4px;
+  cursor: row-resize;
+  background-color: transparent;
+  transition: background-color 0.2s ease;
+  z-index: 10;
+}
+
+.section-resizer:hover,
+.section-resizer:active {
+  background-color: var(--accent);
+}
+
+/* Focus styles for keyboard navigation */
+.file-list:focus,
+.workspace-list:focus {
+  outline: none;
+}
+
+.file-item.keyboard-focused,
+.workspace-item.keyboard-focused {
+  background-color: var(--bg-tertiary);
+  outline: 1px solid var(--accent);
 }
 
 .sidebar-subheader {

@@ -8,8 +8,8 @@ import {
   AlertCircle,
   Pin,
   X,
-  Image,
-  Video,
+  Image as ImageIcon,
+  Video as VideoIcon,
 } from "lucide-react";
 
 interface FileEntry {
@@ -23,6 +23,7 @@ interface FileBrowserProps {
   setCurrentPath: (path: string) => void;
   selectedFile: string | null;
   onSelectFile: (path: string) => void;
+  width: number;
 }
 
 export default function FileBrowser({
@@ -30,10 +31,51 @@ export default function FileBrowser({
   setCurrentPath,
   selectedFile,
   onSelectFile,
+  width,
 }: FileBrowserProps) {
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Keyboard navigation focus indexes
+  const [focusedWorkspaceIndex, setFocusedWorkspaceIndex] = useState<number>(-1);
+  const [focusedEntryIndex, setFocusedEntryIndex] = useState<number>(-1);
+
+  // Persistent workspace pane height percentage (default 25%)
+  const [workspaceHeightPercent, setWorkspaceHeightPercent] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem("tauri-markdown-workspace-ratio");
+      return saved ? parseFloat(saved) : 25;
+    } catch {
+      return 25;
+    }
+  });
+
+  useEffect(() => {
+    localStorage.setItem("tauri-markdown-workspace-ratio", String(workspaceHeightPercent));
+  }, [workspaceHeightPercent]);
+
+  // Drag resizing for workspace section height
+  const startSectionResize = (mouseDownEvent: React.MouseEvent) => {
+    mouseDownEvent.preventDefault();
+    const sidebarElement = mouseDownEvent.currentTarget.parentElement;
+    if (!sidebarElement) return;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const rect = sidebarElement.getBoundingClientRect();
+      const relativeY = moveEvent.clientY - rect.top;
+      const percent = Math.max(15, Math.min(80, (relativeY / rect.height) * 100));
+      setWorkspaceHeightPercent(percent);
+    };
+
+    const handleMouseUp = () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+  };
 
   // Initialize pinned workspaces state from localStorage
   const [pinnedWorkspaces, setPinnedWorkspaces] = useState<string[]>(() => {
@@ -49,6 +91,36 @@ export default function FileBrowser({
   useEffect(() => {
     localStorage.setItem("tauri-markdown-workspaces", JSON.stringify(pinnedWorkspaces));
   }, [pinnedWorkspaces]);
+
+  // Reset focus index when directories change
+  useEffect(() => {
+    setFocusedEntryIndex(-1);
+  }, [entries]);
+
+  // Reset workspace focus index on changes
+  useEffect(() => {
+    setFocusedWorkspaceIndex(-1);
+  }, [pinnedWorkspaces]);
+
+  // Scroll focused entry into view
+  useEffect(() => {
+    if (focusedEntryIndex >= 0) {
+      const el = document.querySelector(`.folders .file-item:nth-child(${focusedEntryIndex + 1})`);
+      if (el) {
+        el.scrollIntoView({ block: "nearest" });
+      }
+    }
+  }, [focusedEntryIndex]);
+
+  // Scroll focused workspace folder into view
+  useEffect(() => {
+    if (focusedWorkspaceIndex >= 0) {
+      const el = document.querySelector(`.workspace .workspace-item:nth-child(${focusedWorkspaceIndex + 1})`);
+      if (el) {
+        el.scrollIntoView({ block: "nearest" });
+      }
+    }
+  }, [focusedWorkspaceIndex]);
 
   // Initialize path to home directory if empty
   useEffect(() => {
@@ -151,15 +223,76 @@ export default function FileBrowser({
     setPinnedWorkspaces(pinnedWorkspaces.filter((p) => p !== path));
   };
 
+  // Keyboard navigation for folders list
+  const handleFoldersKeyDown = (e: React.KeyboardEvent) => {
+    if (entries.length === 0) return;
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setFocusedEntryIndex((prev) => (prev < entries.length - 1 ? prev + 1 : prev));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setFocusedEntryIndex((prev) => (prev > 0 ? prev - 1 : 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const index = focusedEntryIndex >= 0 ? focusedEntryIndex : 0;
+      if (index >= 0 && index < entries.length) {
+        const entry = entries[index];
+        const isMarkdown = entry.name.toLowerCase().endsWith(".md");
+        const isImage = /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(entry.name);
+        const isVideo = /\.(mp4|webm|ogg|mov|mkv)$/i.test(entry.name);
+        const isSelectable = isMarkdown || isImage || isVideo;
+        
+        if (entry.is_dir) {
+          setCurrentPath(entry.path);
+        } else if (isSelectable) {
+          onSelectFile(entry.path);
+        }
+      }
+    }
+  };
+
+  // Keyboard navigation for workspaces list
+  const handleWorkspaceKeyDown = (e: React.KeyboardEvent) => {
+    if (pinnedWorkspaces.length === 0) return;
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setFocusedWorkspaceIndex((prev) => (prev < pinnedWorkspaces.length - 1 ? prev + 1 : prev));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setFocusedWorkspaceIndex((prev) => (prev > 0 ? prev - 1 : 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const index = focusedWorkspaceIndex >= 0 ? focusedWorkspaceIndex : 0;
+      if (index >= 0 && index < pinnedWorkspaces.length) {
+        setCurrentPath(pinnedWorkspaces[index]);
+      }
+    }
+  };
+
   return (
-    <div className="sidebar">
+    <div
+      className="sidebar"
+      style={{
+        width: `${width}px`,
+        minWidth: `${width}px`,
+        maxWidth: `${width}px`,
+      }}
+    >
       <div className="sidebar-header">
         <Folder className="w-4 h-4 text-accent" />
         <span>Workspace Hub</span>
       </div>
 
-      {/* Workspaces Section (Upper Sidebar) */}
-      <div className="sidebar-section workspace">
+      {/* Workspaces Section (Upper Sidebar Pane) */}
+      <div
+        className="sidebar-section workspace"
+        style={{
+          height: `${workspaceHeightPercent}%`,
+          flex: "none",
+        }}
+      >
         <div className="sidebar-subheader">
           <span className="sidebar-section-title">
             <Pin className="w-3.5 h-3.5 text-accent" style={{ transform: "rotate(45deg)" }} />
@@ -172,41 +305,55 @@ export default function FileBrowser({
               No pinned workspace folders.
             </div>
           ) : (
-            <div className="workspace-list">
-              {pinnedWorkspaces.map((path) => (
-                <div
-                  key={path}
-                  className="workspace-item"
-                  onClick={() => setCurrentPath(path)}
-                  title={path}
-                >
-                  <div className="workspace-item-info">
-                    <Folder className="workspace-item-icon" style={{ width: "15px", height: "15px", fill: "var(--accent-soft)", color: "var(--accent)", minWidth: "15px" }} />
-                    <div className="workspace-item-text">
-                      <span className="workspace-item-name">{getFolderName(path)}</span>
-                      <span className="workspace-item-path">{path}</span>
+            <div
+              className="workspace-list"
+              tabIndex={0}
+              onKeyDown={handleWorkspaceKeyDown}
+              onFocus={() => {
+                if (focusedWorkspaceIndex === -1) setFocusedWorkspaceIndex(0);
+              }}
+              onBlur={() => setFocusedWorkspaceIndex(-1)}
+            >
+              {pinnedWorkspaces.map((path, index) => {
+                const isFocused = focusedWorkspaceIndex === index;
+                return (
+                  <div
+                    key={path}
+                    className={`workspace-item ${isFocused ? "keyboard-focused" : ""}`}
+                    onClick={() => setCurrentPath(path)}
+                    title={path}
+                  >
+                    <div className="workspace-item-info">
+                      <Folder style={{ width: "15px", height: "15px", fill: "var(--accent-soft)", color: "var(--accent)" }} />
+                      <div className="workspace-item-text">
+                        <span className="workspace-item-name">{getFolderName(path)}</span>
+                        <span className="workspace-item-path">{path}</span>
+                      </div>
+                    </div>
+                    <div className="workspace-item-actions">
+                      <button
+                        className="workspace-action-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleUnpin(path);
+                        }}
+                        title="Unpin folder"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
-                  <div className="workspace-item-actions">
-                    <button
-                      className="workspace-action-btn"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleUnpin(path);
-                      }}
-                      title="Unpin folder"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
       </div>
 
-      {/* Folders Section (Lower Sidebar) */}
+      {/* Horizontal Drag Resizer divider */}
+      <div className="section-resizer" onMouseDown={startSectionResize} />
+
+      {/* Folders Section (Lower Sidebar Pane) */}
       <div className="sidebar-section folders">
         <div className="sidebar-subheader">
           <span className="sidebar-section-title">
@@ -264,13 +411,21 @@ export default function FileBrowser({
           )}
 
           {!loading && !error && (
-            <div className="file-list">
+            <div
+              className="file-list"
+              tabIndex={0}
+              onKeyDown={handleFoldersKeyDown}
+              onFocus={() => {
+                if (focusedEntryIndex === -1) setFocusedEntryIndex(0);
+              }}
+              onBlur={() => setFocusedEntryIndex(-1)}
+            >
               {entries.length === 0 ? (
                 <div style={{ padding: "16px", textAlign: "center", fontSize: "12px", color: "var(--text-secondary)" }}>
                   Empty Directory
                 </div>
               ) : (
-                entries.map((entry) => {
+                entries.map((entry, index) => {
                   const isMarkdown = entry.name.toLowerCase().endsWith(".md");
                   const isImage = /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(entry.name);
                   const isVideo = /\.(mp4|webm|ogg|mov|mkv)$/i.test(entry.name);
@@ -278,11 +433,12 @@ export default function FileBrowser({
                   
                   const isSelected = selectedFile === entry.path;
                   const isPinned = pinnedWorkspaces.includes(entry.path);
+                  const isFocused = focusedEntryIndex === index;
                   
                   return (
                     <div
                       key={entry.path}
-                      className={`file-item ${isSelected ? "selected" : ""}`}
+                      className={`file-item ${isSelected ? "selected" : ""} ${isFocused ? "keyboard-focused" : ""}`}
                       onClick={() => {
                         if (entry.is_dir) {
                           setCurrentPath(entry.path);
@@ -299,9 +455,9 @@ export default function FileBrowser({
                         {entry.is_dir ? (
                           <Folder style={{ width: "16px", height: "16px", fill: "var(--text-secondary)", opacity: 0.8 }} />
                         ) : isImage ? (
-                          <Image style={{ width: "16px", height: "16px" }} />
+                          <ImageIcon style={{ width: "16px", height: "16px" }} />
                         ) : isVideo ? (
-                          <Video style={{ width: "16px", height: "16px" }} />
+                          <VideoIcon style={{ width: "16px", height: "16px" }} />
                         ) : (
                           <FileText style={{ width: "16px", height: "16px" }} />
                         )}
