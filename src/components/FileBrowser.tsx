@@ -179,9 +179,11 @@ export default function FileBrowser({
                   title={path}
                 >
                   <div className="workspace-item-info">
-                    <Folder style={{ width: "15px", height: "15px", fill: "var(--accent-soft)", color: "var(--accent)" }} />
-                    <span className="workspace-item-name">{getFolderName(path)}</span>
-                    <span className="workspace-item-path">{path}</span>
+                    <Folder className="workspace-item-icon" style={{ width: "15px", height: "15px", fill: "var(--accent-soft)", color: "var(--accent)", minWidth: "15px" }} />
+                    <div className="workspace-item-text">
+                      <span className="workspace-item-name">{getFolderName(path)}</span>
+                      <span className="workspace-item-path">{path}</span>
+                    </div>
                   </div>
                   <div className="workspace-item-actions">
                     <button
