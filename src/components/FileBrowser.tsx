@@ -488,9 +488,10 @@ export default function FileBrowser({
                             title={isPinned ? "Remove from Workspaces" : "Pin to Workspaces"}
                           >
                             <Pin
-                              className="w-3.5 h-3.5"
+                              className={`w-3.5 h-3.5 ${isPinned ? "pinned text-accent" : ""}`}
                               style={{
                                 transform: isPinned ? "none" : "rotate(45deg)",
+                                fill: isPinned ? "var(--accent)" : "none",
                               }}
                             />
                           </button>
