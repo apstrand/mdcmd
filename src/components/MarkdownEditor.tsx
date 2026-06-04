@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "tiptap-markdown";
@@ -37,19 +37,26 @@ export default function MarkdownEditor({
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
-  const isEditable = filePath.toLowerCase().endsWith(".md") || filePath.toLowerCase().endsWith(".qmd");
+  const isMarkdown = filePath.toLowerCase().endsWith(".md") || filePath.toLowerCase().endsWith(".qmd");
+  const isEditable = true; // All files rendered in this component are text files and now editable
+
+  const [plainContent, setPlainContent] = useState(initialContent);
+
+  // Sync plainContent when filePath or initialContent changes
+  useEffect(() => {
+    if (!isMarkdown) {
+      setPlainContent(initialContent);
+    }
+  }, [filePath, initialContent, isMarkdown]);
 
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({
-        // Let markdown extension handle code block or lists if preferred,
-        // but default StarterKit is fully compatible
-      }),
+      StarterKit.configure({}),
       Markdown,
     ],
-    content: initialContent,
-    editable: isEditable,
-    autofocus: isEditable ? 'end' : false,
+    content: isMarkdown ? initialContent : "",
+    editable: isMarkdown,
+    autofocus: isMarkdown ? 'end' : false,
     editorProps: {
       attributes: {
         class: "ProseMirror",
@@ -59,27 +66,35 @@ export default function MarkdownEditor({
 
   // Load new file content when filePath or initialContent changes
   useEffect(() => {
-    if (editor && initialContent !== undefined) {
+    if (isMarkdown && editor && initialContent !== undefined) {
       const currentMarkdown = (editor.storage as any).markdown.getMarkdown();
       if (currentMarkdown !== initialContent) {
         editor.commands.setContent(initialContent);
       }
-      editor.setEditable(isEditable);
-      if (isEditable) {
-        editor.commands.focus('end');
-      }
+      editor.setEditable(true);
+      editor.commands.focus('end');
     }
-  }, [filePath, initialContent, editor, isEditable]);
+  }, [filePath, initialContent, editor, isMarkdown]);
 
   // Handle Save operation
   const handleSave = async () => {
-    if (!editor) return;
     setIsSaving(true);
     setSaveSuccess(false);
     
-    const markdown = (editor.storage as any).markdown.getMarkdown();
+    let contentToSave = "";
+    if (isMarkdown) {
+      if (editor) {
+        contentToSave = (editor.storage as any).markdown.getMarkdown();
+      } else {
+        setIsSaving(false);
+        return;
+      }
+    } else {
+      contentToSave = plainContent;
+    }
+
     try {
-      await onSave(markdown);
+      await onSave(contentToSave);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2000);
     } catch (err) {
@@ -89,19 +104,25 @@ export default function MarkdownEditor({
     }
   };
 
+  // Save handler using refs to avoid event listener thrashing on keystrokes
+  const handleSaveRef = useRef(handleSave);
+  useEffect(() => {
+    handleSaveRef.current = handleSave;
+  }); // runs on every render to keep ref fresh
+
   // Keyboard shortcut Ctrl+S / Cmd+S for saving
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
-        handleSave();
+        handleSaveRef.current();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [editor, onSave]);
+  }, []);
 
-  if (!editor) {
+  if (isMarkdown && !editor) {
     return (
       <div style={{ display: "flex", flexGrow: 1, alignItems: "center", justifyContent: "center", color: "var(--text-secondary)" }}>
         Initializing editor...
@@ -153,7 +174,7 @@ export default function MarkdownEditor({
         </div>
 
         {/* Visual formatting toolbar */}
-        {isEditable && (
+        {isMarkdown && editor && (
           <div className="editor-toolbar">
           <button
             onClick={() => editor.chain().focus().toggleBold().run()}
@@ -274,7 +295,32 @@ export default function MarkdownEditor({
 
       <div className="editor-container">
         <div className="editor-wrapper">
-          <EditorContent editor={editor} />
+          {isMarkdown ? (
+            <EditorContent editor={editor} />
+          ) : (
+            <textarea
+              className="plain-text-editor"
+              value={plainContent}
+              onChange={(e) => setPlainContent(e.target.value)}
+              placeholder="Plain text editor..."
+              style={{
+                width: "100%",
+                minHeight: "500px",
+                border: "none",
+                outline: "none",
+                resize: "vertical",
+                background: "transparent",
+                color: "var(--text-primary)",
+                fontFamily: "var(--font-mono, 'Fira Code', 'JetBrains Mono', Courier, monospace)",
+                fontSize: "14px",
+                lineHeight: "1.6",
+                whiteSpace: "pre-wrap",
+                padding: "20px 28px",
+                boxSizing: "border-box",
+              }}
+              autoFocus
+            />
+          )}
         </div>
       </div>
     </div>
