@@ -12,6 +12,7 @@ use anyhow::Result;
 
 mod config;
 mod markdown;
+mod palette;
 mod tui;
 
 use tui::AppState;

@@ -1,16 +1,15 @@
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 
-pub fn parse_markdown(content: &str) -> Text<'static> {
+pub fn parse_markdown(content: &str, palette: &crate::palette::Palette) -> Text<'static> {
     let mut lines = Vec::new();
     let mut in_code_block = false;
 
-    // Palette alignment with workbench index.css
-    let primary_text_color = Color::Rgb(240, 243, 248);     // HSL 210, 40%, 98%
-    let secondary_text_color = Color::Rgb(148, 161, 178);   // HSL 215, 20%, 65%
-    let accent_color = Color::Rgb(59, 130, 246);           // HSL 217, 91%, 60%
-    let code_color = Color::Rgb(251, 191, 36);             // Amber code color
-    let border_color = Color::Rgb(30, 41, 59);
+    let primary_text_color = palette.text_primary;
+    let secondary_text_color = palette.text_secondary;
+    let accent_color = palette.accent;
+    let code_color = palette.code;
+    let border_color = palette.border_inactive;
 
     for raw_line in content.lines() {
         let trimmed = raw_line.trim();
@@ -105,14 +104,14 @@ pub fn parse_markdown(content: &str) -> Text<'static> {
         }
 
         // 5. Standard line
-        let spans = parse_inline(raw_line, primary_text_color, code_color);
+        let spans = parse_inline(raw_line, primary_text_color, code_color, palette.code_bg);
         lines.push(Line::from(spans));
     }
 
     Text::from(lines)
 }
 
-fn parse_inline(line: &str, text_color: Color, code_color: Color) -> Vec<Span<'static>> {
+fn parse_inline(line: &str, text_color: Color, code_color: Color, code_bg_color: Color) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
     let mut current_idx = 0;
 
@@ -132,7 +131,7 @@ fn parse_inline(line: &str, text_color: Color, code_color: Color) -> Vec<Span<'s
                     let code_text = &line[real_tick_idx + 1..real_close_idx];
                     spans.push(Span::styled(
                         format!(" {} ", code_text),
-                        Style::default().fg(code_color).bg(Color::Rgb(30, 41, 59))
+                        Style::default().fg(code_color).bg(code_bg_color)
                     ));
                     current_idx = real_close_idx + 1;
                 } else {
@@ -170,7 +169,7 @@ fn parse_inline(line: &str, text_color: Color, code_color: Color) -> Vec<Span<'s
                     let code_text = &line[real_tick_idx + 1..real_close_idx];
                     spans.push(Span::styled(
                         format!(" {} ", code_text),
-                        Style::default().fg(code_color).bg(Color::Rgb(30, 41, 59))
+                        Style::default().fg(code_color).bg(code_bg_color)
                     ));
                     current_idx = real_close_idx + 1;
                 } else {
@@ -191,17 +190,34 @@ fn parse_inline(line: &str, text_color: Color, code_color: Color) -> Vec<Span<'s
 mod tests {
     use super::*;
 
+    fn get_mock_palette() -> crate::palette::Palette {
+        crate::palette::Palette {
+            border_active: Color::Blue,
+            border_inactive: Color::Gray,
+            text_primary: Color::White,
+            text_secondary: Color::Gray,
+            text_dimmed: Color::DarkGray,
+            accent: Color::Blue,
+            accent_soft: Color::DarkGray,
+            open_bg: Color::Black,
+            code: Color::Yellow,
+            code_bg: Color::Black,
+        }
+    }
+
     #[test]
     fn test_headers() {
         let content = "# My Heading\nSome text";
-        let parsed = parse_markdown(content);
+        let palette = get_mock_palette();
+        let parsed = parse_markdown(content, &palette);
         assert_eq!(parsed.lines.len(), 3); // Heading line, line separator, text line
     }
 
     #[test]
     fn test_lists_and_tasks() {
         let content = "- [ ] Unfinished task\n- [x] Finished task\n- Normal item";
-        let parsed = parse_markdown(content);
+        let palette = get_mock_palette();
+        let parsed = parse_markdown(content, &palette);
         assert_eq!(parsed.lines.len(), 3);
         
         assert!(parsed.lines[0].to_string().contains("☐"));
@@ -211,7 +227,7 @@ mod tests {
 
     #[test]
     fn test_inline_formatting() {
-        let spans = parse_inline("Normal text with `code` and **bold**", Color::White, Color::Yellow);
+        let spans = parse_inline("Normal text with `code` and **bold**", Color::White, Color::Yellow, Color::Black);
         assert_eq!(spans.len(), 4);
         assert_eq!(spans[0].content, "Normal text with ");
         assert_eq!(spans[1].content, " code ");

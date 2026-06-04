@@ -13,6 +13,7 @@ use anyhow::Result;
 
 use crate::config::Config;
 use crate::markdown::parse_markdown;
+use crate::palette::Palette;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ActiveSection {
@@ -41,6 +42,7 @@ pub struct AppState {
     pub scroll_offset: usize,
     pub error: Option<String>,
     pub quit: bool,
+    pub palette: Palette,
 }
 
 impl AppState {
@@ -53,6 +55,8 @@ impl AppState {
             
         let current_dir = fs::canonicalize(&start_dir)
             .unwrap_or(start_dir);
+
+        let palette = Palette::detect();
 
         let mut app = Self {
             config,
@@ -67,6 +71,7 @@ impl AppState {
             scroll_offset: 0,
             error: None,
             quit: false,
+            palette,
         };
 
         app.reload_directory();
@@ -105,7 +110,7 @@ impl AppState {
 
         match fs::read_to_string(&path) {
             Ok(content) => {
-                let parsed = parse_markdown(&content);
+                let parsed = parse_markdown(&content, &self.palette);
                 self.file_lines_count = parsed.lines.len();
                 self.file_content = Some(parsed);
                 self.selected_file = Some(path);
@@ -398,7 +403,14 @@ impl AppState {
 
     pub fn draw(&self, f: &mut Frame<'_>) {
         let rect = f.size();
-        
+
+        let border_active_color = self.palette.border_active;
+        let border_inactive_color = self.palette.border_inactive;
+        let text_primary_color = self.palette.text_primary;
+        let text_secondary_color = self.palette.text_secondary;
+        let accent_color = self.palette.accent;
+        let accent_soft_color = self.palette.accent_soft;
+
         let main_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -425,9 +437,9 @@ impl AppState {
 
         // Render Pinned Workspaces
         let workspaces_border_color = if self.active_section == ActiveSection::Workspaces {
-            Color::Rgb(59, 130, 246)
+            border_active_color
         } else {
-            Color::Rgb(30, 41, 59)
+            border_inactive_color
         };
 
         let workspaces = &self.config.pinned_workspaces;
@@ -442,18 +454,18 @@ impl AppState {
             let is_selected = i == self.workspace_index && self.active_section == ActiveSection::Workspaces;
             
             let style = if is_selected {
-                Style::default().bg(Color::Rgb(30, 58, 138)).fg(Color::White)
+                Style::default().bg(accent_soft_color).fg(Color::White)
             } else {
-                Style::default().fg(Color::Rgb(240, 243, 248))
+                Style::default().fg(text_primary_color)
             };
 
             list_items.push(ListItem::new(vec![
                 Line::from(vec![
-                    Span::styled("📌 ", Style::default().fg(Color::Rgb(59, 130, 246))),
+                    Span::styled("📌 ", Style::default().fg(accent_color)),
                     Span::styled(folder_name, Style::default().add_modifier(Modifier::BOLD)),
                 ]),
                 Line::from(vec![
-                    Span::styled(format!("  {}", path_str), Style::default().fg(Color::Rgb(148, 161, 178))),
+                    Span::styled(format!("  {}", path_str), Style::default().fg(text_secondary_color)),
                 ]),
             ]).style(style));
         }
@@ -470,9 +482,9 @@ impl AppState {
 
         // Render Directory Folders
         let folders_border_color = if self.active_section == ActiveSection::Folders {
-            Color::Rgb(59, 130, 246)
+            border_active_color
         } else {
-            Color::Rgb(30, 41, 59)
+            border_inactive_color
         };
 
         let mut folder_items = Vec::new();
@@ -485,14 +497,14 @@ impl AppState {
                 .unwrap_or(false);
 
             let style = if is_selected {
-                Style::default().bg(Color::Rgb(30, 58, 138)).fg(Color::White)
+                Style::default().bg(accent_soft_color).fg(Color::White)
             } else if is_currently_open {
-                Style::default().bg(Color::Rgb(15, 32, 66)).fg(Color::Rgb(59, 130, 246)).add_modifier(Modifier::BOLD)
+                Style::default().bg(self.palette.open_bg).fg(accent_color).add_modifier(Modifier::BOLD)
             } else {
                 let fg = if entry.is_dir || is_markdown_file(&entry.name) || is_media_file(&entry.path) {
-                    Color::Rgb(240, 243, 248)
+                    text_primary_color
                 } else {
-                    Color::Rgb(80, 90, 105)
+                    self.palette.text_dimmed
                 };
                 Style::default().fg(fg)
             };
@@ -508,7 +520,7 @@ impl AppState {
             };
 
             folder_items.push(ListItem::new(Line::from(vec![
-                Span::styled(icon, Style::default().fg(Color::Rgb(148, 161, 178))),
+                Span::styled(icon, Style::default().fg(text_secondary_color)),
                 Span::styled(entry.name.clone(), Style::default()),
             ])).style(style));
         }
@@ -525,9 +537,9 @@ impl AppState {
 
         // Render Content Viewer
         let viewer_border_color = if self.active_section == ActiveSection::Viewer {
-            Color::Rgb(59, 130, 246)
+            border_active_color
         } else {
-            Color::Rgb(30, 41, 59)
+            border_inactive_color
         };
 
         let viewer_block = Block::default()
@@ -545,21 +557,21 @@ impl AppState {
                 let media_lines = vec![
                     Line::from(""),
                     Line::from(vec![
-                        Span::styled(format!("  🎞️ Media File: {}", title), Style::default().add_modifier(Modifier::BOLD).fg(Color::Rgb(251, 191, 36)))
+                        Span::styled(format!("  🎞️ Media File: {}", title), Style::default().add_modifier(Modifier::BOLD).fg(self.palette.code))
                     ]),
                     Line::from(vec![
-                        Span::styled(format!("  Type: {}", media_type), Style::default().fg(Color::Rgb(148, 161, 178)))
+                        Span::styled(format!("  Type: {}", media_type), Style::default().fg(text_secondary_color))
                     ]),
                     Line::from(vec![
-                        Span::styled(format!("  Location: {}", path_str), Style::default().fg(Color::Rgb(148, 161, 178)))
+                        Span::styled(format!("  Location: {}", path_str), Style::default().fg(text_secondary_color))
                     ]),
                     Line::from(""),
                     Line::from(vec![
-                        Span::styled("  Press ", Style::default().fg(Color::Rgb(148, 161, 178))),
-                        Span::styled("Enter", Style::default().add_modifier(Modifier::BOLD).fg(Color::Rgb(59, 130, 246))),
-                        Span::styled(" or ", Style::default().fg(Color::Rgb(148, 161, 178))),
-                        Span::styled("o", Style::default().add_modifier(Modifier::BOLD).fg(Color::Rgb(59, 130, 246))),
-                        Span::styled(" to open this media file in your system default GUI application.", Style::default().fg(Color::Rgb(148, 161, 178))),
+                        Span::styled("  Press ", Style::default().fg(text_secondary_color)),
+                        Span::styled("Enter", Style::default().add_modifier(Modifier::BOLD).fg(accent_color)),
+                        Span::styled(" or ", Style::default().fg(text_secondary_color)),
+                        Span::styled("o", Style::default().add_modifier(Modifier::BOLD).fg(accent_color)),
+                        Span::styled(" to open this media file in your system default GUI application.", Style::default().fg(text_secondary_color)),
                     ]),
                     Line::from(""),
                 ];
@@ -583,51 +595,51 @@ impl AppState {
             let landing_text = vec![
                 Line::from(""),
                 Line::from(vec![
-                    Span::styled("    Markdown Workbench TUI", Style::default().fg(Color::Rgb(59, 130, 246)).add_modifier(Modifier::BOLD))
+                    Span::styled("    Markdown Workbench TUI", Style::default().fg(accent_color).add_modifier(Modifier::BOLD))
                 ]),
                 Line::from(vec![
-                    Span::styled("    ──────────────────────", Style::default().fg(Color::Rgb(30, 41, 59)))
+                    Span::styled("    ──────────────────────", Style::default().fg(border_inactive_color))
                 ]),
                 Line::from(""),
                 Line::from(vec![
-                    Span::styled("    No File Open.", Style::default().fg(Color::Rgb(240, 243, 248)).add_modifier(Modifier::BOLD))
+                    Span::styled("    No File Open.", Style::default().fg(text_primary_color).add_modifier(Modifier::BOLD))
                 ]),
                 Line::from("    Select a Markdown (.md) or Media file from the folders list to view it."),
                 Line::from(""),
                 Line::from(vec![
-                    Span::styled("    Keybindings:", Style::default().add_modifier(Modifier::BOLD).fg(Color::Rgb(251, 191, 36)))
+                    Span::styled("    Keybindings:", Style::default().add_modifier(Modifier::BOLD).fg(self.palette.code))
                 ]),
                 Line::from(vec![
-                    Span::styled("    Tab / Shift-Tab : ", Style::default().fg(Color::Rgb(148, 161, 178))),
-                    Span::styled("Cycle focus between panels", Style::default().fg(Color::Rgb(240, 243, 248)))
+                    Span::styled("    Tab / Shift-Tab : ", Style::default().fg(text_secondary_color)),
+                    Span::styled("Cycle focus between panels", Style::default().fg(text_primary_color))
                 ]),
                 Line::from(vec![
-                    Span::styled("    j / k / Arrows  : ", Style::default().fg(Color::Rgb(148, 161, 178))),
-                    Span::styled("Navigate lists and scroll viewer", Style::default().fg(Color::Rgb(240, 243, 248)))
+                    Span::styled("    j / k / Arrows  : ", Style::default().fg(text_secondary_color)),
+                    Span::styled("Navigate lists and scroll viewer", Style::default().fg(text_primary_color))
                 ]),
                 Line::from(vec![
-                    Span::styled("    Enter           : ", Style::default().fg(Color::Rgb(148, 161, 178))),
-                    Span::styled("Navigate folder or open/view file", Style::default().fg(Color::Rgb(240, 243, 248)))
+                    Span::styled("    Enter           : ", Style::default().fg(text_secondary_color)),
+                    Span::styled("Navigate folder or open/view file", Style::default().fg(text_primary_color))
                 ]),
                 Line::from(vec![
-                    Span::styled("    Backspace / u   : ", Style::default().fg(Color::Rgb(148, 161, 178))),
-                    Span::styled("Navigate to parent directory", Style::default().fg(Color::Rgb(240, 243, 248)))
+                    Span::styled("    Backspace / u   : ", Style::default().fg(text_secondary_color)),
+                    Span::styled("Navigate to parent directory", Style::default().fg(text_primary_color))
                 ]),
                 Line::from(vec![
-                    Span::styled("    p               : ", Style::default().fg(Color::Rgb(148, 161, 178))),
-                    Span::styled("Pin/Unpin current folder to Workspaces", Style::default().fg(Color::Rgb(240, 243, 248)))
+                    Span::styled("    p               : ", Style::default().fg(text_secondary_color)),
+                    Span::styled("Pin/Unpin current folder to Workspaces", Style::default().fg(text_primary_color))
                 ]),
                 Line::from(vec![
-                    Span::styled("    e               : ", Style::default().fg(Color::Rgb(148, 161, 178))),
-                    Span::styled("Edit markdown file in terminal $EDITOR", Style::default().fg(Color::Rgb(240, 243, 248)))
+                    Span::styled("    e               : ", Style::default().fg(text_secondary_color)),
+                    Span::styled("Edit markdown file in terminal $EDITOR", Style::default().fg(text_primary_color))
                 ]),
                 Line::from(vec![
-                    Span::styled("    o               : ", Style::default().fg(Color::Rgb(148, 161, 178))),
-                    Span::styled("Open selected file in host default GUI app", Style::default().fg(Color::Rgb(240, 243, 248)))
+                    Span::styled("    o               : ", Style::default().fg(text_secondary_color)),
+                    Span::styled("Open selected file in host default GUI app", Style::default().fg(text_primary_color))
                 ]),
                 Line::from(vec![
-                    Span::styled("    Esc / q         : ", Style::default().fg(Color::Rgb(148, 161, 178))),
-                    Span::styled("Quit application", Style::default().fg(Color::Rgb(240, 243, 248)))
+                    Span::styled("    Esc / q         : ", Style::default().fg(text_secondary_color)),
+                    Span::styled("Quit application", Style::default().fg(text_primary_color))
                 ]),
                 Line::from(""),
             ];
@@ -637,9 +649,9 @@ impl AppState {
         }
 
         // Render Help/Status Bar at bottom
-        let help_bg = Color::Rgb(30, 41, 59);
-        let help_fg = Color::Rgb(240, 243, 248);
-        let key_color = Color::Rgb(59, 130, 246);
+        let help_bg = self.palette.code_bg;
+        let help_fg = text_primary_color;
+        let key_color = accent_color;
 
         if let Some(ref err) = self.error {
             let error_span = Span::styled(format!("  ⚠️ Error: {} ", err), Style::default().bg(Color::Red).fg(Color::White).add_modifier(Modifier::BOLD));
