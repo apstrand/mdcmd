@@ -158,6 +158,62 @@ fn open_terminal(path: String) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn search_directory(path: String, query: String) -> Result<Vec<FileEntry>, String> {
+    let root = Path::new(&path);
+    if !root.exists() || !root.is_dir() {
+        return Err("Invalid directory path".to_string());
+    }
+    
+    let query_lower = query.to_lowercase();
+    let mut results = Vec::new();
+    
+    fn walk_search(dir: &Path, query_lower: &str, results: &mut Vec<FileEntry>) -> std::io::Result<()> {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries {
+                if let Ok(entry) = entry {
+                    let path_buf = entry.path();
+                    let name = entry.file_name().to_string_lossy().into_owned();
+                    
+                    if name.starts_with('.') {
+                        continue;
+                    }
+                    
+                    let is_dir = path_buf.is_dir();
+                    
+                    if name.to_lowercase().contains(query_lower) {
+                        results.push(FileEntry {
+                            name: name.clone(),
+                            path: path_buf.to_string_lossy().into_owned(),
+                            is_dir,
+                        });
+                    }
+                    
+                    if is_dir {
+                        let _ = walk_search(&path_buf, query_lower, results);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+    
+    let _ = walk_search(root, &query_lower, &mut results);
+    
+    // Sort: directories first, then alphabetically
+    results.sort_by(|a, b| {
+        if a.is_dir && !b.is_dir {
+            std::cmp::Ordering::Less
+        } else if !a.is_dir && b.is_dir {
+            std::cmp::Ordering::Greater
+        } else {
+            a.name.to_lowercase().cmp(&b.name.to_lowercase())
+        }
+    });
+    
+    Ok(results)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -167,8 +223,10 @@ pub fn run() {
             list_directory,
             read_file_content,
             write_file_content,
-            open_terminal
+            open_terminal,
+            search_directory
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+
