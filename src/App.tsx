@@ -7,12 +7,45 @@ import { FileCode, Loader2, X, AlertCircle } from "lucide-react";
 
 export default function App() {
   const [currentPath, setCurrentPath] = useState("");
-  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [openTabs, setOpenTabs] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem("tauri-markdown-open-tabs");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [selectedFile, setSelectedFile] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem("tauri-markdown-selected-file");
+    } catch {
+      return null;
+    }
+  });
   const [filesData, setFilesData] = useState<Record<string, { savedContent: string, currentContent: string }>>({});
   const [isLoadingFile, setIsLoadingFile] = useState(false);
-  const [openTabs, setOpenTabs] = useState<string[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
   const [draggedTab, setDraggedTab] = useState<string | null>(null);
+
+  useEffect(() => {
+    localStorage.setItem("tauri-markdown-open-tabs", JSON.stringify(openTabs));
+  }, [openTabs]);
+
+  useEffect(() => {
+    if (selectedFile) {
+      localStorage.setItem("tauri-markdown-selected-file", selectedFile);
+    } else {
+      localStorage.removeItem("tauri-markdown-selected-file");
+    }
+  }, [selectedFile]);
+
+  // Load initial active file content on mount
+  useEffect(() => {
+    const savedSelected = localStorage.getItem("tauri-markdown-selected-file");
+    if (savedSelected) {
+      handleSelectFile(savedSelected);
+    }
+  }, []);
 
   interface PinnedItem {
     path: string;
