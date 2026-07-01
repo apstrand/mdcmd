@@ -14,6 +14,22 @@ struct FileEntry {
     is_dir: bool,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct PinnedItem {
+    path: String,
+    #[serde(rename = "isDir")]
+    is_dir: bool,
+}
+
+/// Path of the config file shared with the CLI/TUI (workbench-cli/config.json).
+fn config_file_path() -> Option<PathBuf> {
+    dirs::config_dir().map(|mut p| {
+        p.push("workbench-cli");
+        p.push("config.json");
+        p
+    })
+}
+
 fn home_dir() -> Option<PathBuf> {
     #[cfg(target_os = "windows")]
     {
@@ -104,6 +120,78 @@ fn write_file_content(path: String, content: String) -> Result<(), String> {
     }
 
     std::fs::write(path, content).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn create_file(path: String) -> Result<(), String> {
+    let p = Path::new(&path);
+    if p.exists() {
+        return Err(format!("File already exists: {}", p.display()));
+    }
+    if let Some(parent) = p.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(p, "").map_err(|e| e.to_string())
+}
+
+/// Read the pinned workspaces from the shared CLI config file.
+/// Supports both legacy string entries and the current `{path, isDir}` form.
+#[tauri::command]
+fn read_workspaces() -> Result<Vec<PinnedItem>, String> {
+    let path = match config_file_path() {
+        Some(p) => p,
+        None => return Ok(Vec::new()),
+    };
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let json: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+
+    let mut items = Vec::new();
+    if let Some(arr) = json.get("pinned_workspaces").and_then(|v| v.as_array()) {
+        for entry in arr {
+            if let Some(s) = entry.as_str() {
+                let is_dir = !Path::new(s).is_file();
+                items.push(PinnedItem { path: s.to_string(), is_dir });
+            } else if let Some(obj) = entry.as_object() {
+                if let Some(p) = obj.get("path").and_then(|v| v.as_str()) {
+                    let is_dir = obj
+                        .get("isDir")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or_else(|| !Path::new(p).is_file());
+                    items.push(PinnedItem { path: p.to_string(), is_dir });
+                }
+            }
+        }
+    }
+    Ok(items)
+}
+
+/// Write the pinned workspaces into the shared CLI config file, preserving
+/// any other fields (such as `view_mode`) already stored there.
+#[tauri::command]
+fn write_workspaces(workspaces: Vec<PinnedItem>) -> Result<(), String> {
+    let path = config_file_path().ok_or_else(|| "Could not determine config directory".to_string())?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+
+    let mut json = if path.exists() {
+        std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+            .unwrap_or_else(|| serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+    if !json.is_object() {
+        json = serde_json::json!({});
+    }
+
+    json["pinned_workspaces"] = serde_json::to_value(&workspaces).map_err(|e| e.to_string())?;
+    let content = serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?;
+    std::fs::write(&path, content).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -415,6 +503,9 @@ pub fn run() {
             list_directory,
             read_file_content,
             write_file_content,
+            create_file,
+            read_workspaces,
+            write_workspaces,
             open_terminal,
             search_directory,
             spawn_pty,

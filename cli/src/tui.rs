@@ -59,6 +59,9 @@ pub struct AppState {
     pub search_active: bool,
     pub search_input: String,
     pub search_query: Option<String>,
+    pub create_active: bool,
+    pub create_input: String,
+    pub status_message: Option<String>,
 }
 
 
@@ -97,6 +100,9 @@ impl AppState {
             search_active: false,
             search_input: String::new(),
             search_query: None,
+            create_active: false,
+            create_input: String::new(),
+            status_message: None,
         };
 
         app.reload_directory();
@@ -276,6 +282,132 @@ impl AppState {
 
 
 
+    fn handle_key_create_input(&mut self, key: event::KeyEvent) -> Result<()> {
+        match key.code {
+            KeyCode::Esc => {
+                self.create_active = false;
+                self.create_input.clear();
+            }
+            KeyCode::Enter => {
+                let name = self.create_input.trim().to_string();
+                self.create_active = false;
+                self.create_input.clear();
+                if !name.is_empty() {
+                    let new_path = self.current_dir.join(&name);
+                    if new_path.exists() {
+                        self.error = Some(format!("File already exists: {}", name));
+                    } else {
+                        if let Some(parent) = new_path.parent() {
+                            let _ = fs::create_dir_all(parent);
+                        }
+                        match fs::write(&new_path, "") {
+                            Ok(_) => {
+                                self.reload_directory();
+                                self.select_file(new_path);
+                                return self.edit_current_file();
+                            }
+                            Err(e) => {
+                                self.error = Some(format!("Error creating file: {}", e));
+                            }
+                        }
+                    }
+                }
+            }
+            KeyCode::Backspace => {
+                self.create_input.pop();
+            }
+            KeyCode::Char(c) => {
+                self.create_input.push(c);
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Copy the given text to the OS clipboard via the platform utility.
+    fn copy_to_clipboard(&mut self, text: &str) {
+        use std::process::{Command, Stdio};
+        use std::io::Write as _;
+
+        #[cfg(target_os = "macos")]
+        let candidates: &[(&str, &[&str])] = &[("pbcopy", &[])];
+        #[cfg(target_os = "windows")]
+        let candidates: &[(&str, &[&str])] = &[("clip", &[])];
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        let candidates: &[(&str, &[&str])] = &[("wl-copy", &[]), ("xclip", &["-selection", "clipboard"])];
+
+        for (cmd, args) in candidates {
+            let child = Command::new(cmd)
+                .args(*args)
+                .stdin(Stdio::piped())
+                .spawn();
+            if let Ok(mut child) = child {
+                if let Some(mut stdin) = child.stdin.take() {
+                    let _ = stdin.write_all(text.as_bytes());
+                }
+                let _ = child.wait();
+                self.status_message = Some(format!("Copied: {}", text));
+                return;
+            }
+        }
+        self.error = Some("No clipboard utility found".to_string());
+    }
+
+    /// Path of the currently focused folder entry (or selected file as fallback).
+    fn focused_path(&self) -> Option<PathBuf> {
+        if let Some(ref query) = self.search_query {
+            let results = self.get_search_results(query);
+            return results.get(self.folder_index).map(|e| PathBuf::from(&e.path));
+        }
+        match self.view_mode {
+            ViewMode::List => self
+                .entries
+                .get(self.folder_index)
+                .map(|e| PathBuf::from(&e.path)),
+            ViewMode::Tree => self
+                .get_flat_tree()
+                .get(self.folder_index)
+                .map(|n| n.path.clone()),
+        }
+    }
+
+    /// Path to copy for the 'y'/'Y' shortcuts: the open file when focused on the
+    /// viewer, otherwise the highlighted folder entry.
+    fn copy_target(&self) -> Option<PathBuf> {
+        if self.active_section == ActiveSection::Viewer {
+            self.selected_file.clone()
+        } else {
+            self.focused_path().or_else(|| self.selected_file.clone())
+        }
+    }
+
+    /// Navigate to the parent of the current directory, keeping the cursor on the
+    /// directory we came from. Works in both List and Tree view.
+    fn go_up_directory(&mut self) {
+        let old_dir = self.current_dir.clone();
+        if let Some(parent) = old_dir.parent() {
+            self.current_dir = parent.to_path_buf();
+            self.reload_directory();
+
+            match self.view_mode {
+                ViewMode::List => {
+                    let old_name = old_dir.file_name().map(|n| n.to_string_lossy().into_owned());
+                    self.folder_index = old_name
+                        .and_then(|name| self.entries.iter().position(|e| e.is_dir && e.name == name))
+                        .unwrap_or(0);
+                }
+                ViewMode::Tree => {
+                    let flat_tree = self.get_flat_tree();
+                    self.folder_index = flat_tree
+                        .iter()
+                        .position(|n| n.path == old_dir)
+                        .unwrap_or(0);
+                }
+            }
+            self.clamp_folder_index();
+        }
+    }
+
     pub fn reload_directory(&mut self) {
         match list_directory(&self.current_dir) {
             Ok(entries) => {
@@ -440,6 +572,13 @@ impl AppState {
     }
 
     pub fn handle_key(&mut self, key: event::KeyEvent) -> Result<()> {
+        self.status_message = None;
+
+        if self.create_active {
+            self.handle_key_create_input(key)?;
+            return Ok(());
+        }
+
         if self.search_active {
             self.handle_key_search_input(key)?;
             return Ok(());
@@ -489,6 +628,28 @@ impl AppState {
         match key.code {
             KeyCode::Char('t') => {
                 let _ = self.open_terminal_in_current_dir();
+                true
+            }
+            KeyCode::Char('n') => {
+                self.create_active = true;
+                self.create_input.clear();
+                true
+            }
+            KeyCode::Char('y') => {
+                if let Some(p) = self.copy_target() {
+                    let s = p.to_string_lossy().into_owned();
+                    self.copy_to_clipboard(&s);
+                }
+                true
+            }
+            KeyCode::Char('Y') => {
+                if let Some(p) = self.copy_target() {
+                    let name = p
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| p.to_string_lossy().into_owned());
+                    self.copy_to_clipboard(&name);
+                }
                 true
             }
             KeyCode::Char('[') => {
@@ -723,25 +884,8 @@ impl AppState {
                     }
                 }
                 KeyCode::Left | KeyCode::Char('h') | KeyCode::Backspace | KeyCode::Char('u') => {
-                    if let Some(parent) = self.current_dir.parent() {
-                        let parent = parent.to_path_buf();
-                        let old_dir_name = self.current_dir.file_name()
-                            .map(|n| n.to_string_lossy().into_owned());
-                        
-                        self.current_dir = parent;
-                        self.reload_directory();
-                        self.search_query = None;
-                        
-                        if let Some(name) = old_dir_name {
-                            if let Some(idx) = self.entries.iter().position(|e| e.is_dir && e.name == name) {
-                                self.folder_index = idx;
-                            } else {
-                                self.folder_index = 0;
-                            }
-                        } else {
-                            self.folder_index = 0;
-                        }
-                    }
+                    self.search_query = None;
+                    self.go_up_directory();
                 }
                 KeyCode::Char('p') => {
                     if !results.is_empty() {
@@ -790,6 +934,15 @@ impl AppState {
                 self.search_input.clear();
             }
             KeyCode::Char('v') => {
+                // Enter the folder under the cursor (if any) before switching modes
+                if let Some(path) = self.focused_path() {
+                    if path.is_dir() {
+                        self.current_dir = path;
+                        self.reload_directory();
+                        self.expanded_paths.clear();
+                        self.folder_index = 0;
+                    }
+                }
                 self.view_mode = match self.view_mode {
                     ViewMode::List => ViewMode::Tree,
                     ViewMode::Tree => ViewMode::List,
@@ -873,36 +1026,26 @@ impl AppState {
             }
             KeyCode::Left | KeyCode::Char('h') => {
                 match self.view_mode {
-                    ViewMode::List => {
-                        if let Some(parent) = self.current_dir.parent() {
-                            let parent = parent.to_path_buf();
-                            let old_dir_name = self.current_dir.file_name()
-                                .map(|n| n.to_string_lossy().into_owned());
-                            
-                            self.current_dir = parent;
-                            self.reload_directory();
-                            
-                            if let Some(name) = old_dir_name {
-                                if let Some(idx) = self.entries.iter().position(|e| e.is_dir && e.name == name) {
-                                    self.folder_index = idx;
-                                } else {
-                                    self.folder_index = 0;
-                                }
-                            } else {
-                                self.folder_index = 0;
-                            }
-                        }
-                    }
+                    ViewMode::List => self.go_up_directory(),
                     ViewMode::Tree => {
                         let flat_tree = self.get_flat_tree();
-                        if !flat_tree.is_empty() {
-                            let node = &flat_tree[self.folder_index];
+                        if flat_tree.is_empty() {
+                            self.go_up_directory();
+                        } else {
+                            let node = flat_tree[self.folder_index].clone();
                             if node.is_dir && self.expanded_paths.contains(&node.path) {
+                                // Collapse an expanded directory in place
                                 self.toggle_expand(node.path.clone());
-                            } else if let Some(ref parent_path) = node.parent_path {
-                                if let Some(parent_idx) = flat_tree.iter().position(|n| &n.path == parent_path) {
-                                    self.folder_index = parent_idx;
-                                }
+                            } else if let Some(parent_idx) = node
+                                .parent_path
+                                .as_ref()
+                                .and_then(|pp| flat_tree.iter().position(|n| &n.path == pp))
+                            {
+                                // Jump to the parent node visible within the tree
+                                self.folder_index = parent_idx;
+                            } else {
+                                // Top-level node: leave the tree root and go up a directory
+                                self.go_up_directory();
                             }
                         }
                     }
@@ -920,37 +1063,7 @@ impl AppState {
                 }
             }
             KeyCode::Backspace | KeyCode::Char('u') => {
-                if let Some(parent) = self.current_dir.parent() {
-                    let parent = parent.to_path_buf();
-                    let old_dir_name = self.current_dir.file_name()
-                        .map(|n| n.to_string_lossy().into_owned());
-                    
-                    self.current_dir = parent.clone();
-                    self.reload_directory();
-                    
-                    match self.view_mode {
-                        ViewMode::List => {
-                            if let Some(name) = old_dir_name {
-                                if let Some(idx) = self.entries.iter().position(|e| e.is_dir && e.name == name) {
-                                    self.folder_index = idx;
-                                } else {
-                                    self.folder_index = 0;
-                                }
-                            } else {
-                                self.folder_index = 0;
-                            }
-                        }
-                        ViewMode::Tree => {
-                            let old_dir_path = parent.join(old_dir_name.as_deref().unwrap_or(""));
-                            let flat_tree = self.get_flat_tree();
-                            if let Some(idx) = flat_tree.iter().position(|n| n.path == old_dir_path) {
-                                self.folder_index = idx;
-                            } else {
-                                self.folder_index = 0;
-                            }
-                        }
-                    }
-                }
+                self.go_up_directory();
             }
             KeyCode::Char('p') => {
                 let (path_to_pin, is_dir) = match self.view_mode {
@@ -1549,6 +1662,14 @@ impl AppState {
                     Span::styled("Open terminal in current directory", Style::default().fg(text_primary_color))
                 ]),
                 Line::from(vec![
+                    Span::styled("    n               : ", Style::default().fg(text_secondary_color)),
+                    Span::styled("Create a new file in current directory", Style::default().fg(text_primary_color))
+                ]),
+                Line::from(vec![
+                    Span::styled("    y / Y           : ", Style::default().fg(text_secondary_color)),
+                    Span::styled("Copy selected file path / name to clipboard", Style::default().fg(text_primary_color))
+                ]),
+                Line::from(vec![
                     Span::styled("    j / k / Arrows  : ", Style::default().fg(text_secondary_color)),
                     Span::styled("Navigate lists and scroll viewer", Style::default().fg(text_primary_color))
                 ]),
@@ -1592,7 +1713,16 @@ impl AppState {
         let help_fg = text_primary_color;
         let key_color = accent_color;
 
-        if self.search_active {
+        if self.create_active {
+            let create_line = Line::from(vec![
+                Span::styled(" 📝 New file: ", Style::default().fg(accent_color).add_modifier(Modifier::BOLD)),
+                Span::styled(self.create_input.clone(), Style::default().fg(text_primary_color)),
+                Span::styled("█", Style::default().fg(accent_color)),
+                Span::styled("  (Enter to create & edit, Esc to cancel)", Style::default().fg(text_secondary_color)),
+            ]);
+            let help_paragraph = Paragraph::new(create_line).style(Style::default().bg(help_bg));
+            f.render_widget(help_paragraph, main_chunks[1]);
+        } else if self.search_active {
             let search_line = Line::from(vec![
                 Span::styled(" 🔍 Search: ", Style::default().fg(accent_color).add_modifier(Modifier::BOLD)),
                 Span::styled(self.search_input.clone(), Style::default().fg(text_primary_color)),
@@ -1601,6 +1731,9 @@ impl AppState {
             ]);
             let help_paragraph = Paragraph::new(search_line).style(Style::default().bg(help_bg));
             f.render_widget(help_paragraph, main_chunks[1]);
+        } else if let Some(ref msg) = self.status_message {
+            let msg_span = Span::styled(format!("  ✅ {} ", msg), Style::default().bg(help_bg).fg(accent_color).add_modifier(Modifier::BOLD));
+            f.render_widget(Paragraph::new(Line::from(vec![msg_span])).style(Style::default().bg(help_bg)), main_chunks[1]);
         } else if let Some(ref err) = self.error {
             let error_span = Span::styled(format!("  ⚠️ Error: {} ", err), Style::default().bg(Color::Red).fg(Color::White).add_modifier(Modifier::BOLD));
             f.render_widget(Paragraph::new(Line::from(vec![error_span])).style(Style::default().bg(help_bg)), main_chunks[1]);
@@ -1614,6 +1747,10 @@ impl AppState {
                 Span::styled(" Workspaces |", Style::default().fg(help_fg)),
                 Span::styled(" t", Style::default().fg(key_color).add_modifier(Modifier::BOLD)),
                 Span::styled(" Term |", Style::default().fg(help_fg)),
+                Span::styled(" n", Style::default().fg(key_color).add_modifier(Modifier::BOLD)),
+                Span::styled(" New |", Style::default().fg(help_fg)),
+                Span::styled(" y/Y", Style::default().fg(key_color).add_modifier(Modifier::BOLD)),
+                Span::styled(" Copy path/name |", Style::default().fg(help_fg)),
                 Span::styled(" Enter", Style::default().fg(key_color).add_modifier(Modifier::BOLD)),
                 Span::styled(" Open/Expand |", Style::default().fg(help_fg)),
                 Span::styled(" Backspace/u", Style::default().fg(key_color).add_modifier(Modifier::BOLD)),
