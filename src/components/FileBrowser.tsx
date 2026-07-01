@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { storage } from "../storage";
 import {
   Folder,
   FileText,
@@ -13,6 +14,7 @@ import {
   Terminal as TerminalIcon,
   FolderTree,
   List,
+  FilePlus,
 } from "lucide-react";
 
 interface FileEntry {
@@ -54,6 +56,12 @@ export default function FileBrowser({
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // New-file creation state
+  const [creatingFile, setCreatingFile] = useState(false);
+  const [newFileName, setNewFileName] = useState("");
+  const [reloadToken, setReloadToken] = useState(0);
+  const newFileInputRef = useRef<HTMLInputElement>(null);
 
   const sidebarRef = useRef<HTMLDivElement>(null);
 
@@ -168,10 +176,7 @@ export default function FileBrowser({
           for (const item of pinnedWorkspaces) {
             if (item.isDir) {
               try {
-                const res = await invoke<FileEntry[]>("search_directory", { 
-                  path: item.path, 
-                  query: searchQuery 
-                });
+                const res = await storage.searchDirectory(item.path, searchQuery);
                 for (const entry of res) {
                   if (!seenPaths.has(entry.path)) {
                     seenPaths.add(entry.path);
@@ -200,7 +205,7 @@ export default function FileBrowser({
         } else {
           // Search in current folder
           const root = viewMode === "tree" ? treeRootPath : currentPath;
-          const res = await invoke<FileEntry[]>("search_directory", { path: root, query: searchQuery });
+          const res = await storage.searchDirectory(root, searchQuery);
           setSearchResults(res);
         }
       } catch (err) {
@@ -224,7 +229,7 @@ export default function FileBrowser({
   const loadTreeDirectory = async (path: string) => {
     if (treeEntries[path]) return; // already loaded
     try {
-      const res = await invoke<FileEntry[]>("list_directory", { path });
+      const res = await storage.listDirectory(path);
       setTreeEntries((prev) => ({
         ...prev,
         [path]: res,
@@ -366,7 +371,7 @@ export default function FileBrowser({
   useEffect(() => {
     if (!currentPath) {
       setLoading(true);
-      invoke<string>("get_home_dir")
+      storage.getHomeDir()
         .then((home) => {
           setCurrentPath(home);
         })
@@ -385,7 +390,7 @@ export default function FileBrowser({
     setLoading(true);
     setError(null);
 
-    invoke<FileEntry[]>("list_directory", { path: currentPath })
+    storage.listDirectory(currentPath)
       .then((data) => {
         if (active) {
           setEntries(data);
@@ -402,7 +407,7 @@ export default function FileBrowser({
     return () => {
       active = false;
     };
-  }, [currentPath]);
+  }, [currentPath, reloadToken]);
 
   // Go to parent directory
   const handleGoUp = () => {
@@ -469,6 +474,49 @@ export default function FileBrowser({
     invoke("open_terminal", { path: currentPath })
       .catch((err) => alert(`Error opening terminal: ${err}`));
     sidebarRef.current?.focus();
+  };
+
+  // Begin creating a new file in the current folder
+  const startCreateFile = () => {
+    setError(null);
+    setCreatingFile(true);
+    setNewFileName("");
+    // Focus the input on the next tick once it has rendered
+    setTimeout(() => newFileInputRef.current?.focus(), 0);
+  };
+
+  // Create a new (empty) file in the current folder and open it
+  const handleCreateFile = async () => {
+    const name = newFileName.trim();
+    if (!name) {
+      setCreatingFile(false);
+      sidebarRef.current?.focus();
+      return;
+    }
+    const targetDir = viewMode === "tree" ? treeRootPath : currentPath;
+    if (!targetDir) return;
+    const isWindows = targetDir.includes("\\");
+    const sep = isWindows ? "\\" : "/";
+    const fullPath = targetDir.endsWith(sep) ? `${targetDir}${name}` : `${targetDir}${sep}${name}`;
+
+    try {
+      await storage.createFile(fullPath);
+      setCreatingFile(false);
+      setNewFileName("");
+      // Refresh listings so the new file shows up
+      setReloadToken((t) => t + 1);
+      if (viewMode === "tree") {
+        try {
+          const res = await storage.listDirectory(targetDir);
+          setTreeEntries((prev) => ({ ...prev, [targetDir]: res }));
+        } catch (err) {
+          console.error("Failed to refresh tree directory:", err);
+        }
+      }
+      onSelectFile(fullPath);
+    } catch (err) {
+      setError(String(err));
+    }
   };
 
   // Central keyboard navigation for the entire sidebar
@@ -725,12 +773,24 @@ export default function FileBrowser({
                 className="file-action-btn"
                 tabIndex={-1}
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={handleOpenTerminal}
-                title="Open terminal in this folder"
+                onClick={startCreateFile}
+                title="Create new file in this folder"
                 style={{ opacity: 0.8 }}
               >
-                <TerminalIcon className="w-3.5 h-3.5" />
+                <FilePlus className="w-3.5 h-3.5" />
               </button>
+              {storage.capabilities.terminal && (
+                <button
+                  className="file-action-btn"
+                  tabIndex={-1}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={handleOpenTerminal}
+                  title="Open terminal in this folder"
+                  style={{ opacity: 0.8 }}
+                >
+                  <TerminalIcon className="w-3.5 h-3.5" />
+                </button>
+              )}
               {viewMode === "list" && (
                 <button
                   className="file-action-btn"
@@ -834,6 +894,39 @@ export default function FileBrowser({
             )}
           </div>
         </div>
+        {creatingFile && (
+          <div style={{ padding: "0 12px 8px 12px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px", backgroundColor: "var(--bg-tertiary)", borderRadius: "4px", padding: "4px 8px", border: "1px solid var(--accent)" }}>
+              <FilePlus className="w-3.5 h-3.5" style={{ color: "var(--accent)", flexShrink: 0 }} />
+              <input
+                ref={newFileInputRef}
+                type="text"
+                placeholder="new-file.md (Enter to create)"
+                value={newFileName}
+                onChange={(e) => setNewFileName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleCreateFile();
+                  } else if (e.key === "Escape") {
+                    e.preventDefault();
+                    setCreatingFile(false);
+                    setNewFileName("");
+                    sidebarRef.current?.focus();
+                  }
+                }}
+                style={{
+                  border: "none",
+                  outline: "none",
+                  background: "transparent",
+                  color: "var(--text-primary)",
+                  fontSize: "12px",
+                  width: "100%",
+                }}
+              />
+            </div>
+          </div>
+        )}
         <div className="sidebar-scroll-content">
           {viewMode === "list" && (
             <div style={{ display: "flex", gap: "6px", marginBottom: "8px" }}>

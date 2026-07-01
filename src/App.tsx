@@ -5,7 +5,11 @@ import FileBrowser from "./components/FileBrowser";
 import MarkdownEditor from "./components/MarkdownEditor";
 import MediaViewer from "./components/MediaViewer";
 import TerminalPane from "./components/TerminalPane";
-import { FileCode, Loader2, X, AlertCircle, RefreshCw } from "lucide-react";
+import { storage } from "./storage";
+import { FileCode, Loader2, X, AlertCircle, RefreshCw, Copy, Type } from "lucide-react";
+
+// True for the desktop (Tauri) build; false for the static web / Dropbox build.
+const isDesktop = storage.id === "tauri";
 
 export default function App() {
   const [currentPath, setCurrentPath] = useState("");
@@ -81,6 +85,7 @@ export default function App() {
   });
 
   useEffect(() => {
+    if (!storage.capabilities.updater) return;
     const timer = setTimeout(async () => {
       try {
         const version = await invoke<string | null>("check_for_updates");
@@ -112,8 +117,9 @@ export default function App() {
     }
   }, []);
 
-  // Intercept application window close to check for unsaved changes
+  // Intercept application window close to check for unsaved changes (desktop only)
   useEffect(() => {
+    if (!isDesktop) return;
     const appWindow = getCurrentWindow();
     const unlistenPromise = appWindow.onCloseRequested(async (event) => {
       // Always prevent default and manage the window lifecycle explicitly,
@@ -136,10 +142,7 @@ export default function App() {
             try {
               await Promise.all(
                 dirtyFiles.map(async ([path, data]) => {
-                  await invoke("write_file_content", {
-                    path,
-                    content: data.currentContent,
-                  });
+                  await storage.writeFile(path, data.currentContent);
                 })
               );
               await getCurrentWindow().destroy();
@@ -169,26 +172,46 @@ export default function App() {
     isDir: boolean;
   }
 
-  // Lifted workspaces state with backward compatibility
-  const [pinnedWorkspaces, setPinnedWorkspaces] = useState<PinnedItem[]>(() => {
-    try {
-      const saved = localStorage.getItem("tauri-markdown-workspaces");
-      if (!saved) return [];
-      const parsed = JSON.parse(saved);
-      return parsed.map((item: any) => {
-        if (typeof item === "string") {
-          return { path: item, isDir: true };
-        }
-        return item;
-      });
-    } catch {
-      return [];
-    }
-  });
+  // Pinned workspaces are shared with the CLI/TUI via the workbench-cli config file.
+  const [pinnedWorkspaces, setPinnedWorkspaces] = useState<PinnedItem[]>([]);
+  const [workspacesLoaded, setWorkspacesLoaded] = useState(false);
 
+  // Load workspaces from the shared config on mount, migrating any legacy
+  // localStorage workspaces into the shared config on first run.
   useEffect(() => {
-    localStorage.setItem("tauri-markdown-workspaces", JSON.stringify(pinnedWorkspaces));
-  }, [pinnedWorkspaces]);
+    storage.readWorkspaces()
+      .then((items) => {
+        if (items.length === 0) {
+          try {
+            const legacy = localStorage.getItem("tauri-markdown-workspaces");
+            if (legacy) {
+              const parsed = JSON.parse(legacy);
+              const migrated: PinnedItem[] = parsed.map((item: any) =>
+                typeof item === "string" ? { path: item, isDir: true } : item
+              );
+              if (migrated.length > 0) {
+                setPinnedWorkspaces(migrated);
+                localStorage.removeItem("tauri-markdown-workspaces");
+                return;
+              }
+            }
+          } catch {
+            // ignore malformed legacy data
+          }
+        }
+        setPinnedWorkspaces(items);
+      })
+      .catch((err) => console.error("Failed to load workspaces:", err))
+      .finally(() => setWorkspacesLoaded(true));
+  }, []);
+
+  // Persist workspaces back to the shared config whenever they change.
+  useEffect(() => {
+    if (!workspacesLoaded) return;
+    storage.writeWorkspaces(pinnedWorkspaces).catch((err) =>
+      console.error("Failed to save workspaces:", err)
+    );
+  }, [pinnedWorkspaces, workspacesLoaded]);
 
   const sortedPinned = useMemo(() => {
     return [...pinnedWorkspaces].sort((a, b) => {
@@ -275,7 +298,7 @@ export default function App() {
 
     setIsLoadingFile(true);
     try {
-      const content = await invoke<string>("read_file_content", { path: filePath });
+      const content = await storage.readFile(filePath);
       setFilesData(prev => ({
         ...prev,
         [filePath]: { savedContent: content, currentContent: content }
@@ -348,13 +371,22 @@ export default function App() {
     return path.substring(path.lastIndexOf(separator) + 1);
   };
 
+  // Copy text (path or name) of the active file to the clipboard
+  const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
+  const copyToClipboard = async (text: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyFeedback(`Copied ${label}`);
+      setTimeout(() => setCopyFeedback(null), 1500);
+    } catch (err) {
+      console.error("Clipboard copy failed:", err);
+    }
+  };
+
   // Write content back to the local file
   const handleSaveFile = async (filePath: string, content: string) => {
     try {
-      await invoke("write_file_content", {
-        path: filePath,
-        content,
-      });
+      await storage.writeFile(filePath, content);
       setFilesData(prev => ({
         ...prev,
         [filePath]: { savedContent: content, currentContent: content }
@@ -384,10 +416,7 @@ export default function App() {
     try {
       await Promise.all(
         dirtyFiles.map(async ([path, data]) => {
-          await invoke("write_file_content", {
-            path,
-            content: data.currentContent,
-          });
+          await storage.writeFile(path, data.currentContent);
         })
       );
       setFilesData(prev => {
@@ -418,6 +447,21 @@ export default function App() {
     };
     window.addEventListener("keydown", handleCmdW);
     return () => window.removeEventListener("keydown", handleCmdW);
+  }, []);
+
+  // Keyboard shortcut Cmd+Shift+C / Ctrl+Shift+C to copy the active file's path
+  useEffect(() => {
+    const handleCopyPath = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "c") {
+        const file = selectedFileRef.current;
+        if (file) {
+          e.preventDefault();
+          copyToClipboard(file, "path");
+        }
+      }
+    };
+    window.addEventListener("keydown", handleCopyPath);
+    return () => window.removeEventListener("keydown", handleCopyPath);
   }, []);
 
   // Keyboard shortcut Cmd+Alt+S / Ctrl+Alt+S to save all dirty files
@@ -500,6 +544,7 @@ export default function App() {
 
   // Keyboard shortcut Ctrl+` to toggle the terminal panel
   useEffect(() => {
+    if (!storage.capabilities.terminal) return;
     const handleToggleTerminal = (e: KeyboardEvent) => {
       if (e.ctrlKey && (e.key === "`" || e.code === "Backquote")) {
         e.preventDefault();
@@ -644,6 +689,25 @@ export default function App() {
                 Save All
               </button>
             )}
+            {selectedFile && (
+              <div className="tab-copy-actions">
+                {copyFeedback && <span className="copy-feedback">{copyFeedback}</span>}
+                <button
+                  className="tab-copy-btn"
+                  onClick={() => copyToClipboard(getFileName(selectedFile), "name")}
+                  title="Copy file name"
+                >
+                  <Type className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  className="tab-copy-btn"
+                  onClick={() => copyToClipboard(selectedFile, "path")}
+                  title="Copy file path (Cmd+Shift+C)"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -687,25 +751,29 @@ export default function App() {
           )}
         </div>
 
-        {/* Resizer and Terminal Pane (Always mounted to preserve session states) */}
-        <div 
-          className="terminal-resizer" 
-          onMouseDown={startTerminalResize} 
-          style={{ display: isTerminalOpen ? "block" : "none" }}
-        />
-        <div 
-          style={{ 
-            height: isTerminalOpen ? `${terminalHeight}px` : "0px", 
-            display: isTerminalOpen ? "flex" : "none", 
-            flexDirection: "column", 
-            flexShrink: 0 
-          }}
-        >
-          <TerminalPane
-            currentPath={currentPath}
-            onClose={() => setIsTerminalOpen(false)}
-          />
-        </div>
+        {/* Resizer and Terminal Pane (desktop only; always mounted to preserve session state) */}
+        {storage.capabilities.terminal && (
+          <>
+            <div
+              className="terminal-resizer"
+              onMouseDown={startTerminalResize}
+              style={{ display: isTerminalOpen ? "block" : "none" }}
+            />
+            <div
+              style={{
+                height: isTerminalOpen ? `${terminalHeight}px` : "0px",
+                display: isTerminalOpen ? "flex" : "none",
+                flexDirection: "column",
+                flexShrink: 0
+              }}
+            >
+              <TerminalPane
+                currentPath={currentPath}
+                onClose={() => setIsTerminalOpen(false)}
+              />
+            </div>
+          </>
+        )}
       </div>
 
       {/* Custom Confirm Modal Dialog */}

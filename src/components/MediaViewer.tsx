@@ -1,4 +1,5 @@
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { useEffect, useState } from "react";
+import { storage } from "../storage";
 import { Eye, Image as ImageIcon, Video as VideoIcon } from "lucide-react";
 
 interface MediaViewerProps {
@@ -15,7 +16,14 @@ export default function MediaViewer({ filePath }: MediaViewerProps) {
     return path.substring(path.lastIndexOf(separator) + 1);
   };
 
-  const assetUrl = convertFileSrc(filePath);
+  const [assetUrl, setAssetUrl] = useState<string>("");
+  useEffect(() => {
+    let active = true;
+    storage.getMediaUrl(filePath)
+      .then((url) => { if (active) setAssetUrl(url); })
+      .catch((err) => console.error("Failed to resolve media URL:", err));
+    return () => { active = false; };
+  }, [filePath]);
 
   return (
     <div className="main-panel">
