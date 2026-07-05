@@ -1623,7 +1623,7 @@ impl AppState {
             let landing_text = vec![
                 Line::from(""),
                 Line::from(vec![
-                    Span::styled("    Markdown Workbench TUI", Style::default().fg(accent_color).add_modifier(Modifier::BOLD))
+                    Span::styled("    MarkDown Commander (mdc) TUI", Style::default().fg(accent_color).add_modifier(Modifier::BOLD))
                 ]),
                 Line::from(vec![
                     Span::styled("    ──────────────────────", Style::default().fg(border_inactive_color))

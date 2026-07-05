@@ -1,7 +1,7 @@
 {
-  "name": "Workbench",
-  "short_name": "Workbench",
-  "description": "A markdown workbench for browsing and editing your files.",
+  "name": "MarkDown Commander",
+  "short_name": "mdcmd",
+  "description": "MarkDown Commander — browse and edit your markdown files.",
   "start_url": ".",
   "scope": ".",
   "display": "standalone",

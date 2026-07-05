@@ -21,10 +21,10 @@ struct PinnedItem {
     is_dir: bool,
 }
 
-/// Path of the config file shared with the CLI/TUI (workbench-cli/config.json).
+/// Path of the config file shared with the CLI/TUI (mdcmd/config.json).
 fn config_file_path() -> Option<PathBuf> {
     dirs::config_dir().map(|mut p| {
-        p.push("workbench-cli");
+        p.push("mdcmd");
         p.push("config.json");
         p
     })

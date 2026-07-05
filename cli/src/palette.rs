@@ -49,10 +49,10 @@ impl Palette {
 }
 
 pub fn is_light_mode() -> bool {
-    if std::env::var("WORKBENCH_LIGHT_MODE").is_ok() {
+    if std::env::var("MDCMD_LIGHT_MODE").is_ok() {
         return true;
     }
-    if std::env::var("WORKBENCH_DARK_MODE").is_ok() {
+    if std::env::var("MDCMD_DARK_MODE").is_ok() {
         return false;
     }
 

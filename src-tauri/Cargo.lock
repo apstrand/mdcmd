@@ -2100,6 +2100,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "mdcmd"
+version = "0.1.0"
+dependencies = [
+ "dirs 5.0.1",
+ "portable-pty",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-opener",
+ "tauri-plugin-updater",
+ "tauri-plugin-window-state",
+]
+
+[[package]]
 name = "memchr"
 version = "2.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5503,21 +5518,6 @@ dependencies = [
  "serde_json",
  "unicode-xid",
  "wasmparser",
-]
-
-[[package]]
-name = "workbench"
-version = "0.1.0"
-dependencies = [
- "dirs 5.0.1",
- "portable-pty",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-opener",
- "tauri-plugin-updater",
- "tauri-plugin-window-state",
 ]
 
 [[package]]

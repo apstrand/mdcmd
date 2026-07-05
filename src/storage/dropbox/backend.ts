@@ -5,7 +5,7 @@ const RPC_BASE = "https://api.dropboxapi.com/2";
 const CONTENT_BASE = "https://content.dropboxapi.com/2";
 
 // Web workspaces are UI state; persist them locally (desktop shares via config file).
-const WORKSPACES_KEY = "workbench-dropbox-workspaces";
+const WORKSPACES_KEY = "mdcmd-dropbox-workspaces";
 
 // Dropbox uses "" for the root; the UI uses "/". Map between them.
 function toDbxPath(path: string): string {

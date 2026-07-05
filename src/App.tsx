@@ -172,7 +172,7 @@ export default function App() {
     isDir: boolean;
   }
 
-  // Pinned workspaces are shared with the CLI/TUI via the workbench-cli config file.
+  // Pinned workspaces are shared with the CLI/TUI via the mdcmd config file.
   const [pinnedWorkspaces, setPinnedWorkspaces] = useState<PinnedItem[]>([]);
   const [workspacesLoaded, setWorkspacesLoaded] = useState(false);
 

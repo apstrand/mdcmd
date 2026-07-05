@@ -1,6 +1,6 @@
-# Markdown Editor & File Browser
+# mdcmd — MarkDown Commander
 
-A Markdown editor built with **Tauri v2**, **React**, **TypeScript**, and **Tiptap**. It enables browsing local files via a sidebar list and editing `.md` documents natively using a visual WYSIWYG editor that reads and saves pure Markdown.
+**mdcmd** (MarkDown Commander) is a Markdown editor and file browser built with **Tauri v2**, **React**, **TypeScript**, and **Tiptap**. It enables browsing local files via a sidebar list and editing `.md` documents natively using a visual WYSIWYG editor that reads and saves pure Markdown. A companion terminal UI ships as the `mdc` CLI.
 
 ## Key Features
 

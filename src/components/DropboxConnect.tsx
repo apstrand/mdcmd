@@ -41,7 +41,7 @@ export default function DropboxConnect({ children }: { children: React.ReactNode
       style={{ height: "100vh", flexDirection: "column", gap: "16px", textAlign: "center", padding: "24px" }}
     >
       <Cloud className="w-16 h-16 text-accent" />
-      <h2 style={{ margin: 0, fontWeight: 600, fontSize: "22px" }}>Workbench</h2>
+      <h2 style={{ margin: 0, fontWeight: 600, fontSize: "22px" }}>MarkDown Commander</h2>
 
       {error && (
         <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "hsl(0, 84%, 60%)", fontSize: "13px" }}>

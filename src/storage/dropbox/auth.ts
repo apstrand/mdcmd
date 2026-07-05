@@ -10,8 +10,8 @@ const APP_KEY = import.meta.env.VITE_DROPBOX_APP_KEY as string | undefined;
 const TOKEN_ENDPOINT = "https://api.dropboxapi.com/oauth2/token";
 const AUTHORIZE_ENDPOINT = "https://www.dropbox.com/oauth2/authorize";
 
-const STORAGE_KEY = "workbench-dropbox-token";
-const VERIFIER_KEY = "workbench-dropbox-pkce-verifier";
+const STORAGE_KEY = "mdcmd-dropbox-token";
+const VERIFIER_KEY = "mdcmd-dropbox-pkce-verifier";
 
 interface StoredToken {
   accessToken: string;

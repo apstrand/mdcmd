@@ -82,7 +82,7 @@ impl Config {
 
     fn config_file_path() -> Option<PathBuf> {
         dirs::config_dir().map(|mut p| {
-            p.push("workbench-cli");
+            p.push("mdcmd");
             p.push("config.json");
             p
         })
