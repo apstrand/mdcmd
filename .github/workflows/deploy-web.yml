@@ -1,0 +1,75 @@
+name: Deploy Web
+
+# Builds the static site (dist-web/) and rsyncs it to a remote server over SSH.
+#
+# Required repository secrets:
+#   DEPLOY_USER          - SSH user on the target server
+#   DEPLOY_HOST           - target server hostname / site (e.g. example.com)
+#   DEPLOY_PATH           - target folder on the server (e.g. /var/www/mdcmd)
+#   DEPLOY_SSH_KEY        - private SSH key authorized for DEPLOY_USER@DEPLOY_HOST
+#   VITE_DROPBOX_APP_KEY  - Dropbox app key baked into the build (PKCE, no secret)
+# Optional secret:
+#   DEPLOY_PORT           - SSH port (defaults to 22)
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "src/**"
+      - "public/**"
+      - "index.html"
+      - "package.json"
+      - "package-lock.json"
+      - "vite.config.ts"
+      - "tsconfig*.json"
+      - ".github/workflows/deploy-web.yml"
+  workflow_dispatch:
+
+# Avoid overlapping deploys clobbering each other.
+concurrency:
+  group: deploy-web
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build static site
+        run: npm run build:web
+        env:
+          VITE_DROPBOX_APP_KEY: ${{ secrets.VITE_DROPBOX_APP_KEY }}
+
+      - name: Configure SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "${DEPLOY_PORT:-22}" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Deploy with rsync
+        env:
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+        run: |
+          rsync -avz --delete \
+            -e "ssh -i ~/.ssh/deploy_key -p ${DEPLOY_PORT:-22}" \
+            dist-web/ "${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/"
