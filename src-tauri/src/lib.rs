@@ -51,10 +51,24 @@ fn home_dir() -> Option<PathBuf> {
 }
 
 #[tauri::command]
-fn get_home_dir() -> Result<String, String> {
-    home_dir()
-        .map(|p| p.to_string_lossy().into_owned())
-        .ok_or_else(|| "Could not find home directory".to_string())
+fn get_home_dir(app: tauri::AppHandle) -> Result<String, String> {
+    // On mobile there is no $HOME to browse; root the file view at the app's
+    // private data directory (guaranteed to exist and be readable). The native
+    // document pickers add access to iCloud Drive / Google Drive / Files on top.
+    #[cfg(mobile)]
+    {
+        use tauri::Manager;
+        let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        return Ok(dir.to_string_lossy().into_owned());
+    }
+    #[cfg(desktop)]
+    {
+        let _ = &app;
+        home_dir()
+            .map(|p| p.to_string_lossy().into_owned())
+            .ok_or_else(|| "Could not find home directory".to_string())
+    }
 }
 
 #[tauri::command]

@@ -26,7 +26,11 @@
 /* Global resets */
 body {
   margin: 0;
-  padding: 0;
+  /* Respect device safe areas (notch, status bar, home indicator) on mobile.
+     env(safe-area-inset-*) resolves to 0 on desktop, so this is a no-op there. */
+  box-sizing: border-box;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+    env(safe-area-inset-bottom) env(safe-area-inset-left);
   background-color: var(--bg-primary);
   color: var(--text-primary);
   height: 100vh;
@@ -61,8 +65,8 @@ body {
 /* Layout Utilities */
 .app-container {
   display: flex;
-  height: 100vh;
-  width: 100vw;
+  height: 100%;
+  width: 100%;
   background-color: var(--bg-primary);
 }
 
