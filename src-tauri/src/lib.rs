@@ -1,10 +1,19 @@
 use std::path::{Path, PathBuf};
 use std::env;
-use std::sync::Mutex;
-use std::collections::HashMap;
-use std::io::Write;
-use portable_pty::MasterPty;
 use serde::{Serialize, Deserialize};
+
+// Terminal (PTY), the "open in Terminal" command, and the auto-updater are
+// desktop-only; their imports and code are gated behind `cfg(desktop)` so the
+// mobile (iOS/Android) build compiles without them.
+#[cfg(desktop)]
+use std::sync::Mutex;
+#[cfg(desktop)]
+use std::collections::HashMap;
+#[cfg(desktop)]
+use std::io::Write;
+#[cfg(desktop)]
+use portable_pty::MasterPty;
+#[cfg(desktop)]
 use tauri::Emitter;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -194,6 +203,7 @@ fn write_workspaces(workspaces: Vec<PinnedItem>) -> Result<(), String> {
     std::fs::write(&path, content).map_err(|e| e.to_string())
 }
 
+#[cfg(desktop)]
 #[tauri::command]
 fn open_terminal(path: String) -> Result<(), String> {
     let path = PathBuf::from(&path);
@@ -307,27 +317,32 @@ fn search_directory(path: String, query: String) -> Result<Vec<FileEntry>, Strin
     Ok(results)
 }
 
+#[cfg(desktop)]
 struct PtySession {
     writer: Box<dyn Write + Send>,
     master: Box<dyn MasterPty + Send>,
 }
 
+#[cfg(desktop)]
 #[derive(Default)]
 struct PtyState {
     sessions: Mutex<HashMap<String, PtySession>>,
 }
 
+#[cfg(desktop)]
 #[derive(Clone, serde::Serialize)]
 struct PtyDataPayload {
     session_id: String,
     data: String,
 }
 
+#[cfg(desktop)]
 #[derive(Clone, serde::Serialize)]
 struct PtyExitPayload {
     session_id: String,
 }
 
+#[cfg(desktop)]
 #[tauri::command]
 fn spawn_pty(
     session_id: String,
@@ -412,6 +427,7 @@ fn spawn_pty(
     Ok(())
 }
 
+#[cfg(desktop)]
 #[tauri::command]
 fn write_to_pty(
     session_id: String,
@@ -431,6 +447,7 @@ fn write_to_pty(
     }
 }
 
+#[cfg(desktop)]
 #[tauri::command]
 fn resize_pty(
     session_id: String,
@@ -456,6 +473,7 @@ fn resize_pty(
     }
 }
 
+#[cfg(desktop)]
 #[tauri::command]
 fn close_pty(session_id: String, state: tauri::State<'_, PtyState>) -> Result<(), String> {
     let mut sessions = state.sessions.lock().unwrap();
@@ -466,6 +484,7 @@ fn close_pty(session_id: String, state: tauri::State<'_, PtyState>) -> Result<()
     }
 }
 
+#[cfg(desktop)]
 #[tauri::command]
 async fn check_for_updates(app: tauri::AppHandle) -> Result<Option<String>, String> {
     use tauri_plugin_updater::UpdaterExt;
@@ -477,6 +496,7 @@ async fn check_for_updates(app: tauri::AppHandle) -> Result<Option<String>, Stri
         .map_err(|e| e.to_string())
 }
 
+#[cfg(desktop)]
 #[tauri::command]
 async fn download_and_install_update(app: tauri::AppHandle) -> Result<(), String> {
     use tauri_plugin_updater::UpdaterExt;
@@ -493,8 +513,11 @@ async fn download_and_install_update(app: tauri::AppHandle) -> Result<(), String
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
+    let builder = tauri::Builder::default().plugin(tauri_plugin_opener::init());
+
+    // Desktop registers the terminal/window-state/updater plugins and commands.
+    #[cfg(desktop)]
+    let builder = builder
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(PtyState::default())
@@ -514,7 +537,23 @@ pub fn run() {
             close_pty,
             check_for_updates,
             download_and_install_update
-        ])
+        ]);
+
+    // Mobile exposes only the portable file/workspace commands; storage is
+    // reached through the platform document pickers.
+    #[cfg(mobile)]
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        get_home_dir,
+        list_directory,
+        read_file_content,
+        write_file_content,
+        create_file,
+        read_workspaces,
+        write_workspaces,
+        search_directory
+    ]);
+
+    builder
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
