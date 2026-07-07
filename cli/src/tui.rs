@@ -66,15 +66,23 @@ pub struct AppState {
 
 
 impl AppState {
-    pub fn new(initial_dir: Option<PathBuf>) -> Self {
+    pub fn new(initial_path: Option<PathBuf>) -> Self {
         let config = Config::load();
         
-        let start_dir = initial_dir
+        let start_path = initial_path
             .or_else(|| dirs::home_dir())
             .unwrap_or_else(|| PathBuf::from("."));
             
-        let current_dir = fs::canonicalize(&start_dir)
-            .unwrap_or(start_dir);
+        let start_path = fs::canonicalize(&start_path)
+            .unwrap_or(start_path);
+
+        let mut initial_file = None;
+        let current_dir = if start_path.is_file() {
+            initial_file = Some(start_path.clone());
+            start_path.parent().unwrap_or(&start_path).to_path_buf()
+        } else {
+            start_path
+        };
 
         let palette = Palette::detect();
 
@@ -106,6 +114,12 @@ impl AppState {
         };
 
         app.reload_directory();
+
+        if let Some(file) = initial_file {
+            app.select_file(file);
+            app.active_section = ActiveSection::Viewer;
+        }
+
         app
     }
 
@@ -1316,7 +1330,7 @@ impl AppState {
             let is_selected = i == self.workspace_index && self.active_section == ActiveSection::Workspaces;
             
             let style = if is_selected {
-                Style::default().bg(accent_soft_color).fg(Color::White)
+                Style::default().bg(accent_color).fg(Color::White)
             } else {
                 Style::default().fg(text_primary_color)
             };
@@ -1362,7 +1376,7 @@ impl AppState {
                     .unwrap_or(false);
 
                 let style = if is_selected {
-                    Style::default().bg(accent_soft_color).fg(Color::White)
+                    Style::default().bg(accent_color).fg(Color::White)
                 } else if is_currently_open {
                     Style::default().bg(self.palette.open_bg).fg(accent_color).add_modifier(Modifier::BOLD)
                 } else {
@@ -1414,7 +1428,7 @@ impl AppState {
                         .unwrap_or(false);
 
                     let style = if is_selected {
-                        Style::default().bg(accent_soft_color).fg(Color::White)
+                        Style::default().bg(accent_color).fg(Color::White)
                     } else if is_currently_open {
                         Style::default().bg(self.palette.open_bg).fg(accent_color).add_modifier(Modifier::BOLD)
                     } else {
@@ -1451,7 +1465,7 @@ impl AppState {
                         .unwrap_or(false);
 
                     let style = if is_selected {
-                        Style::default().bg(accent_soft_color).fg(Color::White)
+                        Style::default().bg(accent_color).fg(Color::White)
                     } else if is_currently_open {
                         Style::default().bg(self.palette.open_bg).fg(accent_color).add_modifier(Modifier::BOLD)
                     } else {

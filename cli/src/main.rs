@@ -19,12 +19,12 @@ use tui::AppState;
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
-    let initial_dir = if args.len() > 1 {
+    let initial_path = if args.len() > 1 {
         let path = PathBuf::from(&args[1]);
-        if path.exists() && path.is_dir() {
+        if path.exists() {
             Some(path)
         } else {
-            eprintln!("Warning: provided path is not a directory or does not exist.");
+            eprintln!("Warning: provided path does not exist.");
             None
         }
     } else {
@@ -45,7 +45,7 @@ fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = AppState::new(initial_dir);
+    let mut app = AppState::new(initial_path);
 
     while !app.quit {
         if app.needs_clear {
