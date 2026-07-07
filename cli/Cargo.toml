@@ -2,6 +2,12 @@
 name = "mdc"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+keywords = ["markdown"]
+homepage = "https://mdcmd.com"
+repository = "https://github.com/apstrand/mdcmd"
+readme = "../README.md"
+description = "Markdown editor and file browser"
 
 [[bin]]
 name = "mdc"
