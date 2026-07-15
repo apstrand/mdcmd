@@ -54,6 +54,7 @@ export default function FileBrowser({
   setViewMode,
 }: FileBrowserProps) {
   const [entries, setEntries] = useState<FileEntry[]>([]);
+  const [sortOrder, setSortOrder] = useState<"name" | "mtime">("name");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -384,30 +385,37 @@ export default function FileBrowser({
 
   // Load directory contents when current path changes
   useEffect(() => {
-    if (!currentPath) return;
+  if (!currentPath) return;
 
-    let active = true;
-    setLoading(true);
-    setError(null);
+  let active = true;
+  setLoading(true);
+  setError(null);
 
-    storage.listDirectory(currentPath)
-      .then((data) => {
-        if (active) {
-          setEntries(data);
-          setLoading(false);
-        }
-      })
-      .catch((err) => {
-        if (active) {
-          setError(String(err));
-          setLoading(false);
-        }
-      });
+  storage.listDirectory(currentPath)
+    .then((data) => {
+      if (active) {
+        const sorted = [...data].sort((a, b) => {
+          if (sortOrder === "mtime") {
+             // Note: Backend doesn't currently provide mtime. Placeholder logic.
+             return 0;
+          }
+          return a.name.localeCompare(b.name);
+        });
+        setEntries(sorted);
+        setLoading(false);
+      }
+    })
+    .catch((err) => {
+      if (active) {
+        setError(String(err));
+        setLoading(false);
+      }
+    });
 
-    return () => {
-      active = false;
-    };
-  }, [currentPath, reloadToken]);
+  return () => {
+    active = false;
+  };
+  }, [currentPath, reloadToken, sortOrder]);
 
   // Go to parent directory
   const handleGoUp = () => {
@@ -654,7 +662,27 @@ export default function FileBrowser({
     >
       <div className="sidebar-header">
         <Folder className="w-4 h-4 text-accent" />
-        <span>Workspace Hub</span>
+        <span>mdcmd</span>
+        <div className="sidebar-header-actions" style={{ marginLeft: "auto", display: "flex", gap: "8px" }}>
+          <select
+            className="sidebar-sort-select"
+            value={sortOrder}
+            onChange={(e) => setSortOrder(e.target.value as "name" | "mtime")}
+            style={{ fontSize: "10px", background: "transparent", color: "var(--text-secondary)", border: "none" }}
+          >
+            <option value="name">Name</option>
+            <option value="mtime">Time</option>
+          </select>
+          <input type="file" id="file-picker" style={{ display: "none" }} onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) {
+               alert("File selected: " + file.name);
+            }
+          }} />
+          <button className="sidebar-action-btn" title="Open file" onClick={() => document.getElementById("file-picker")?.click()}>
+            <FilePlus className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       {/* Workspaces Section (Upper Sidebar Pane) */}
