@@ -24,6 +24,10 @@
 }
 
 /* Global resets */
+html {
+  height: 100%;
+}
+
 body {
   margin: 0;
   /* Respect device safe areas (notch, status bar, home indicator) on mobile.
@@ -33,8 +37,20 @@ body {
     env(safe-area-inset-bottom) env(safe-area-inset-left);
   background-color: var(--bg-primary);
   color: var(--text-primary);
+  /* 100dvh tracks the *visible* viewport on mobile (falls back to 100vh where
+     dvh is unsupported), so the app fills the screen instead of collapsing. */
   height: 100vh;
+  height: 100dvh;
   width: 100vw;
+  overflow: hidden;
+}
+
+/* The React mount must carry the full height down to `.app-container`, otherwise
+   `.app-container { height: 100% }` resolves against an auto-height #root and the
+   whole UI collapses into the top-left corner. */
+#root {
+  height: 100%;
+  width: 100%;
   overflow: hidden;
 }
 
@@ -68,6 +84,76 @@ body {
   height: 100%;
   width: 100%;
   background-color: var(--bg-primary);
+}
+
+/* Mobile (phone) single-pane layout: show one pane at a time — the file browser,
+   or the editor once a file is open. The desktop resizer is removed and the
+   sidebar spans the full width. */
+.mobile-back-btn {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  /* Sidebar carries an inline width for the desktop resizer; override it. */
+  .app-container .sidebar {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+  }
+  .app-container .sidebar-resizer {
+    display: none !important;
+  }
+  /* Only one pane is visible at a time. Both panes carry inline styles
+     (sidebar width, editor-panel `display:flex`), so overrides need
+     `!important` to win over the element styles. */
+  .app-container.has-file .sidebar {
+    display: none !important;
+  }
+  .app-container:not(.has-file) .editor-panel {
+    display: none !important;
+  }
+  .app-container .editor-panel {
+    width: 100%;
+  }
+  .app-container .editor-panel .mobile-back-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+    padding: 10px 12px;
+    border: none;
+    border-bottom: 1px solid var(--border);
+    border-radius: 0;
+    box-shadow: none;
+    background-color: var(--bg-secondary);
+    color: var(--accent);
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  /* Header action icons are tiny, low-contrast tap targets on desktop; on a
+     phone they read as faint dots. Enlarge them into proper tap targets and
+     use the accent color at full opacity so they're clearly visible.
+     The `.app-container` prefix lifts specificity above the base
+     `.file-action-btn` rules that appear later in this stylesheet. */
+  .app-container .file-action-btn,
+  .app-container .workspace-action-btn {
+    width: 34px;
+    height: 34px;
+    opacity: 1 !important;
+    color: var(--accent);
+  }
+  .app-container .file-action-btn svg,
+  .app-container .workspace-action-btn svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  /* On a phone the raw device path under each workspace is redundant with the
+     folder name and just shows an ugly /private/var/… string — hide it. */
+  .app-container .workspace-item-path {
+    display: none;
+  }
 }
 
 /* Sidebar Styling */
@@ -248,6 +334,10 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
   line-height: 1.2;
+  /* Truncate long paths on the LEFT so the meaningful end (folder/file name)
+     stays visible instead of the /private/var/… prefix. */
+  direction: rtl;
+  text-align: left;
 }
 
 .workspace-item-actions {
@@ -299,6 +389,18 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Left-truncating path text: keeps the end of the path (the current folder /
+   file name) visible and drops the long prefix with a leading ellipsis. */
+.path-ellipsis-left {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
 }
 
 .nav-button {

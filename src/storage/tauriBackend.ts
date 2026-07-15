@@ -8,6 +8,7 @@ export const tauriBackend: StorageBackend = {
     terminal: true,
     updater: true,
     requiresAuth: false,
+    documentPicker: false,
   },
 
   getHomeDir() {

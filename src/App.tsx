@@ -6,7 +6,7 @@ import MarkdownEditor from "./components/MarkdownEditor";
 import MediaViewer from "./components/MediaViewer";
 import TerminalPane from "./components/TerminalPane";
 import { storage } from "./storage";
-import { FileCode, Loader2, X, AlertCircle, RefreshCw, Copy, Type } from "lucide-react";
+import { FileCode, Loader2, X, AlertCircle, RefreshCw, Copy, Type, ChevronLeft } from "lucide-react";
 
 // True for the desktop (Tauri) build; false for the static web / Dropbox build.
 const isDesktop = storage.id === "tauri";
@@ -178,7 +178,15 @@ export default function App() {
 
   // Load workspaces from the shared config on mount, migrating any legacy
   // localStorage workspaces into the shared config on first run.
+  //
+  // On iOS the pinned workspaces are folders reached through the native document
+  // picker; their access is granted via security-scoped bookmarks that must be
+  // re-activated on each launch. Do that first so listing a restored folder
+  // works, then load the workspaces.
   useEffect(() => {
+    Promise.resolve(storage.restoreAccess?.())
+      .catch((err) => console.error("Failed to restore folder access:", err))
+      .finally(() => {
     storage.readWorkspaces()
       .then((items) => {
         if (items.length === 0) {
@@ -203,6 +211,7 @@ export default function App() {
       })
       .catch((err) => console.error("Failed to load workspaces:", err))
       .finally(() => setWorkspacesLoaded(true));
+      });
   }, []);
 
   // Persist workspaces back to the shared config whenever they change.
@@ -600,8 +609,13 @@ export default function App() {
     setDraggedTab(null);
   };
 
+  // On narrow (phone) viewports the layout collapses to a single pane via CSS
+  // media queries; `has-file` tells the stylesheet to swap the file browser for
+  // the editor once a file is open.
+  const showEditor = Boolean(selectedFile) || isLoadingFile;
+
   return (
-    <div className="app-container">
+    <div className={`app-container${showEditor ? " has-file" : ""}`}>
       {/* File Browser Sidebar */}
       <FileBrowser
         currentPath={currentPath}
@@ -620,7 +634,17 @@ export default function App() {
       <div className="sidebar-resizer" onMouseDown={startSidebarResize} />
 
       {/* Editor/Viewer Panel with Tabs Bar */}
-      <div style={{ flexGrow: 1, display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+      <div className="editor-panel" style={{ flexGrow: 1, display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+        {/* On mobile the sidebar is hidden while a file is open, so offer a way
+            back to the file browser (tabs are preserved). Hidden on desktop and
+            when no file is open via CSS. */}
+        <button
+          className="mobile-back-btn"
+          onClick={() => setSelectedFile(null)}
+        >
+          <ChevronLeft className="w-4 h-4" />
+          <span>Files</span>
+        </button>
         {/* Update notification banner */}
         {updateVersion && !updateDismissed && (
           <div className="update-banner">

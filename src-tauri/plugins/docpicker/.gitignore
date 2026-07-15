@@ -1,0 +1,12 @@
+# Rust build output
+/target
+
+# Tauri Swift API, fetched at iOS build time — regenerated, do not commit
+/.tauri
+
+# Library crate: dependency versions are resolved by the consuming app
+# (tracked in src-tauri/Cargo.lock)
+/Cargo.lock
+
+# SwiftPM resolution, regenerated on build
+/ios/Package.resolved

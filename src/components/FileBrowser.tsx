@@ -15,6 +15,7 @@ import {
   FolderTree,
   List,
   FilePlus,
+  FolderPlus,
 } from "lucide-react";
 
 interface FileEntry {
@@ -418,18 +419,41 @@ export default function FileBrowser({
   }, [currentPath, reloadToken, sortOrder]);
 
   // Go to parent directory
+  // The pinned "storage root" that contains `path` (the longest matching pinned
+  // directory), with any trailing separator stripped — or null. On mobile these
+  // are folders picked via the document picker, and browsing must not go above
+  // them (that would leave the security-scoped sandbox).
+  const getPinnedRoot = (path: string): string | null => {
+    if (!path) return null;
+    const sep = path.includes("\\") ? "\\" : "/";
+    const root = pinnedWorkspaces
+      .filter(
+        (p) =>
+          p.isDir &&
+          (path === p.path ||
+            path.startsWith(p.path.replace(/[/\\]+$/, "") + sep)),
+      )
+      .sort((a, b) => b.path.length - a.path.length)[0];
+    return root ? root.path.replace(/[/\\]+$/, "") : null;
+  };
+
+  // Whether navigation is capped at a picked root (mobile document-picker roots
+  // are security-scoped, so going above them isn't allowed).
+  const navRoot = () =>
+    storage.capabilities.documentPicker ? getPinnedRoot(currentPath) : null;
+
   const handleGoUp = () => {
     if (!currentPath) return;
     const isWindows = currentPath.includes("\\");
     const separator = isWindows ? "\\" : "/";
     const parts = currentPath.split(separator);
-    
+
     if (parts.length > 1) {
       if (parts[parts.length - 1] === "") {
         parts.pop();
       }
       parts.pop();
-      
+
       let parent = parts.join(separator);
       if (parent === "" && !isWindows) {
         parent = "/";
@@ -437,7 +461,13 @@ export default function FileBrowser({
       if (isWindows && parent.endsWith(":")) {
         parent = parent + "\\";
       }
-      
+
+      // Don't step above a picked storage root.
+      const root = navRoot();
+      if (root && (parent.length < root.length || !root.startsWith(parent))) {
+        return;
+      }
+
       setCurrentPath(parent || separator);
     }
   };
@@ -445,6 +475,11 @@ export default function FileBrowser({
   // Determine if we can go up further
   const canGoUp = () => {
     if (!currentPath) return false;
+    // At (or would step above) a picked storage root: stop here.
+    const root = navRoot();
+    if (root && currentPath.replace(/[/\\]+$/, "") === root) {
+      return false;
+    }
     const isWindows = currentPath.includes("\\");
     if (isWindows) {
       return currentPath.split("\\").filter(Boolean).length > 1;
@@ -464,6 +499,27 @@ export default function FileBrowser({
     return parts.length > 0 ? parts[parts.length - 1] : path;
   };
 
+  // Show a path relative to its pinned "storage root" (e.g. a folder picked
+  // from Files / iCloud Drive), like "Notes › drafts › todo.md", instead of the
+  // raw device path (/private/var/mobile/…). Falls back to the absolute path
+  // when it isn't under any pinned root.
+  const displayPath = (fullPath: string) => {
+    if (!fullPath) return fullPath;
+    const sep = fullPath.includes("\\") ? "\\" : "/";
+    const root = pinnedWorkspaces
+      .filter(
+        (p) =>
+          p.isDir &&
+          (fullPath === p.path ||
+            fullPath.startsWith(p.path.replace(/[/\\]+$/, "") + sep)),
+      )
+      .sort((a, b) => b.path.length - a.path.length)[0];
+    if (!root) return fullPath;
+    const name = getFolderName(root.path);
+    const sub = fullPath.substring(root.path.length).replace(/^[/\\]+/, "");
+    return sub ? `${name} › ${sub}` : name;
+  };
+
   // Pin a folder or file
   const handlePin = (path: string, isDir: boolean) => {
     if (!pinnedWorkspaces.some((p) => p.path === path)) {
@@ -474,6 +530,30 @@ export default function FileBrowser({
   // Unpin a folder or file
   const handleUnpin = (path: string) => {
     setPinnedWorkspaces(pinnedWorkspaces.filter((p) => p.path !== path));
+    // On iOS, dropping a picked folder should also release its security-scoped
+    // bookmark so we stop holding access to it.
+    storage.releaseFolder?.(path).catch((err) =>
+      console.error("Failed to release folder:", err)
+    );
+  };
+
+  // Pick a folder via the native document picker (iOS) and pin it as a
+  // workspace, then navigate into it.
+  const [isPicking, setIsPicking] = useState(false);
+  const handleAddFolder = async () => {
+    if (!storage.pickFolder) return;
+    setIsPicking(true);
+    try {
+      const folder = await storage.pickFolder();
+      if (folder) {
+        handlePin(folder.path, true);
+        setCurrentPath(folder.path);
+      }
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setIsPicking(false);
+    }
   };
 
   // Open terminal at path
@@ -701,6 +781,26 @@ export default function FileBrowser({
             <Star className="w-3.5 h-3.5 text-accent" style={{ fill: "var(--accent)" }} />
             <span>Workspaces</span>
           </span>
+          {storage.capabilities.documentPicker && (
+            <button
+              className="file-action-btn"
+              tabIndex={-1}
+              disabled={isPicking}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleAddFolder();
+              }}
+              title="Add a folder from Files / iCloud Drive"
+              style={{ opacity: 0.8 }}
+            >
+              {isPicking ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <FolderPlus className="w-3.5 h-3.5" />
+              )}
+            </button>
+          )}
         </div>
         <div className="sidebar-scroll-content">
           {sortedPinned.length === 0 ? (
@@ -972,7 +1072,9 @@ export default function FileBrowser({
                 <ChevronLeft className="w-4 h-4" />
               </button>
               <div className="path-bar" title={currentPath}>
-                {currentPath || "Loading path..."}
+                <span className="path-ellipsis-left">
+                  {displayPath(currentPath) || "Loading path..."}
+                </span>
               </div>
             </div>
           )}
@@ -980,7 +1082,8 @@ export default function FileBrowser({
           {viewMode === "tree" && (
             <div style={{ display: "flex", gap: "6px", marginBottom: "8px", alignItems: "center" }}>
               <div className="path-bar" title={treeRootPath} style={{ flexGrow: 1, fontSize: "11px", opacity: 0.8 }}>
-                🌳 {treeRootPath}
+                <span style={{ flexShrink: 0 }}>🌳</span>
+                <span className="path-ellipsis-left">{displayPath(treeRootPath)}</span>
               </div>
             </div>
           )}

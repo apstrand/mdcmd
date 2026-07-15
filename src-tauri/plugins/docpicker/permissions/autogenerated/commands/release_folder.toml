@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-release-folder"
+description = "Enables the release_folder command without any pre-configured scope."
+commands.allow = ["release_folder"]
+
+[[permission]]
+identifier = "deny-release-folder"
+description = "Denies the release_folder command without any pre-configured scope."
+commands.deny = ["release_folder"]

@@ -553,6 +553,11 @@ pub fn run() {
             download_and_install_update
         ]);
 
+    // iOS gets the native folder picker (UIDocumentPicker + security-scoped
+    // bookmarks); Android SAF is a follow-up.
+    #[cfg(target_os = "ios")]
+    let builder = builder.plugin(tauri_plugin_docpicker::init());
+
     // Mobile exposes only the portable file/workspace commands; storage is
     // reached through the platform document pickers.
     #[cfg(mobile)]

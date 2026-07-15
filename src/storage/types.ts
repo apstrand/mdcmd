@@ -18,6 +18,17 @@ export interface StorageCapabilities {
   updater: boolean;
   /** Whether the backend requires the user to authenticate before use (web/Dropbox). */
   requiresAuth: boolean;
+  /**
+   * Whether a native folder picker is available (iOS document picker). When
+   * true, the backend implements `pickFolder`/`restoreAccess`/`releaseFolder`.
+   */
+  documentPicker: boolean;
+}
+
+/** A folder the user granted access to via the native document picker. */
+export interface PickedFolder {
+  path: string;
+  name: string;
 }
 
 export interface StorageBackend {
@@ -36,4 +47,18 @@ export interface StorageBackend {
   writeWorkspaces(items: PinnedItem[]): Promise<void>;
   /** Resolve a URL usable in <img>/<video> src for the given media file. */
   getMediaUrl(path: string): Promise<string>;
+
+  /**
+   * Present the native folder picker (iOS). Resolves to the picked folder, or
+   * `null` if the user cancels. Only present when `capabilities.documentPicker`.
+   */
+  pickFolder?(): Promise<PickedFolder | null>;
+  /**
+   * Re-activate saved folder bookmarks so previously-picked folders are readable
+   * again after an app relaunch. Returns the paths now accessible. Call before
+   * the first directory listing on startup.
+   */
+  restoreAccess?(): Promise<string[]>;
+  /** Release access to (and forget) a previously-picked folder (on unpin). */
+  releaseFolder?(path: string): Promise<void>;
 }

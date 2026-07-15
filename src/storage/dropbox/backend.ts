@@ -74,6 +74,7 @@ export const dropboxBackend: StorageBackend = {
     terminal: false,
     updater: false,
     requiresAuth: true,
+    documentPicker: false,
   },
 
   async getHomeDir() {
