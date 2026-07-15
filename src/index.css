@@ -552,16 +552,33 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+/* Name + path stack; must be able to shrink so the path can truncate. */
+.file-title-lines {
+  min-width: 0;
+  overflow: hidden;
 }
 
 .file-name-text {
   font-weight: 600;
   font-size: 14px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .file-path-text {
   font-size: 11px;
   color: var(--text-secondary);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  /* Cut on the LEFT so the file name at the end stays visible. */
+  direction: rtl;
+  text-align: left;
 }
 
 .save-status {

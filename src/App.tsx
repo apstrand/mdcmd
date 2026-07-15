@@ -6,6 +6,7 @@ import MarkdownEditor from "./components/MarkdownEditor";
 import MediaViewer from "./components/MediaViewer";
 import TerminalPane from "./components/TerminalPane";
 import { storage } from "./storage";
+import { displayRelativePath } from "./utils/paths";
 import { FileCode, Loader2, X, AlertCircle, RefreshCw, Copy, Type, ChevronLeft } from "lucide-react";
 
 // True for the desktop (Tauri) build; false for the static web / Dropbox build.
@@ -759,6 +760,7 @@ export default function App() {
               <MarkdownEditor
                 key={selectedFile}
                 filePath={selectedFile}
+                pathLabel={displayRelativePath(selectedFile, pinnedWorkspaces)}
                 initialContent={filesData[selectedFile]?.currentContent || ""}
                 onSave={handleSaveFile}
                 onChange={handleContentChange}
