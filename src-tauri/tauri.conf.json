@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "mdcmd",
+  "productName": "MarkDown Commander",
   "version": "0.1.0",
   "identifier": "com.mdcmd",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "mdcmd",
+        "title": "MarkDown Commander",
         "width": 800,
         "height": 600
       }
