@@ -479,6 +479,16 @@ body {
   opacity: 0.8;
 }
 
+/* On touch devices there is no hover, so revealing row actions on :hover turns
+   the first tap into a no-op "hover" and opening a file needs a second tap.
+   Show the actions at rest on touch so a single tap opens the item. */
+@media (hover: none) {
+  .file-item-actions,
+  .workspace-item-actions {
+    opacity: 0.55;
+  }
+}
+
 .file-action-btn {
   display: flex;
   align-items: center;
