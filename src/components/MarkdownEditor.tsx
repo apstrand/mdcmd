@@ -148,6 +148,9 @@ interface MarkdownEditorProps {
   initialContent: string;
   onSave: (filePath: string, content: string) => Promise<void>;
   onChange?: (filePath: string, content: string) => void;
+  /** Shortened, storage-relative path shown under the file name (falls back to
+   *  the absolute path). */
+  pathLabel?: string;
 }
 
 export default function MarkdownEditor({
@@ -155,6 +158,7 @@ export default function MarkdownEditor({
   initialContent,
   onSave,
   onChange,
+  pathLabel,
 }: MarkdownEditorProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -499,10 +503,12 @@ export default function MarkdownEditor({
       <div className="editor-header">
         <div className="file-info">
           <div className="file-title-container">
-            <FileEdit className="w-5 h-5 text-accent" />
-            <div>
+            <FileEdit className="w-5 h-5 text-accent" style={{ flexShrink: 0 }} />
+            <div className="file-title-lines">
               <div className="file-name-text">{getFileName(filePath)}</div>
-              <div className="file-path-text">{filePath}</div>
+              <div className="file-path-text" title={filePath}>
+                {pathLabel || filePath}
+              </div>
             </div>
           </div>
 
