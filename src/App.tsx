@@ -322,6 +322,35 @@ export default function App() {
     }
   };
 
+  // Open files handed to the app by the OS: iOS "Open With" / share menu, or a
+  // file opened with the desktop app. The Rust side buffers cold-launch opens
+  // (drained here on mount) and emits `files-opened` while running.
+  const handleSelectFileRef = useRef(handleSelectFile);
+  handleSelectFileRef.current = handleSelectFile;
+  useEffect(() => {
+    if (storage.id !== "tauri") return;
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    const openFirst = (paths?: string[] | null) => {
+      const p = paths?.find(Boolean);
+      if (p) handleSelectFileRef.current(p);
+    };
+    import("@tauri-apps/api/event")
+      .then(({ listen }) =>
+        listen<string[]>("files-opened", (e) => openFirst(e.payload)),
+      )
+      .then((u) => {
+        if (cancelled) u();
+        else unlisten = u;
+      })
+      .catch(() => {});
+    invoke<string[]>("drain_opened_files").then(openFirst).catch(() => {});
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
   // Close tab and cycle active tab selection
   const handleCloseTab = (pathToRemove: string) => {
     const isDirty = filesData[pathToRemove] && filesData[pathToRemove].savedContent !== filesData[pathToRemove].currentContent;

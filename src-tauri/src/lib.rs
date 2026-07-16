@@ -525,9 +525,37 @@ async fn download_and_install_update(app: tauri::AppHandle) -> Result<(), String
     Ok(())
 }
 
+/// Files the app was asked to open (iOS "Open With" / share menu). The
+/// `RunEvent::Opened` handler pushes paths here; the frontend drains them on
+/// launch (to catch cold starts) and also listens for the `files-opened` event.
+#[derive(Default)]
+struct OpenedFiles(std::sync::Mutex<Vec<String>>);
+
+#[tauri::command]
+fn drain_opened_files(state: tauri::State<'_, OpenedFiles>) -> Vec<String> {
+    let mut files = state.0.lock().unwrap();
+    std::mem::take(&mut *files)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let builder = tauri::Builder::default().plugin(tauri_plugin_opener::init());
+    // Files passed on the command line (e.g. `mdcmd notes.md`). macOS "Open
+    // With" / double-click delivers files via RunEvent::Opened instead (handled
+    // below), not argv.
+    #[cfg(desktop)]
+    let initial_files: Vec<String> = std::env::args()
+        .skip(1)
+        .filter(|a| !a.starts_with('-'))
+        .filter_map(|a| std::fs::canonicalize(&a).ok())
+        .filter(|p| p.is_file())
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    #[cfg(not(desktop))]
+    let initial_files: Vec<String> = Vec::new();
+
+    let builder = tauri::Builder::default()
+        .manage(OpenedFiles(std::sync::Mutex::new(initial_files)))
+        .plugin(tauri_plugin_opener::init());
 
     // Desktop registers the terminal/window-state/updater plugins and commands.
     #[cfg(desktop)]
@@ -550,7 +578,8 @@ pub fn run() {
             resize_pty,
             close_pty,
             check_for_updates,
-            download_and_install_update
+            download_and_install_update,
+            drain_opened_files
         ]);
 
     // iOS gets the native folder picker (UIDocumentPicker + security-scoped
@@ -569,12 +598,32 @@ pub fn run() {
         create_file,
         read_workspaces,
         write_workspaces,
-        search_directory
+        search_directory,
+        drain_opened_files
     ]);
 
     builder
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // Files handed to the app via the OS "Open With" / share menu arrive
+            // as RunEvent::Opened. Buffer them (for a frontend drain on launch)
+            // and emit an event for listeners already running.
+            if let tauri::RunEvent::Opened { urls } = event {
+                use tauri::{Emitter, Manager};
+                let paths: Vec<String> = urls
+                    .iter()
+                    .filter_map(|u| u.to_file_path().ok())
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .collect();
+                if !paths.is_empty() {
+                    if let Some(state) = app_handle.try_state::<OpenedFiles>() {
+                        state.0.lock().unwrap().extend(paths.iter().cloned());
+                    }
+                    let _ = app_handle.emit("files-opened", paths);
+                }
+            }
+        });
 }
 
 

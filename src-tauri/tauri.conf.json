@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "com.mdcmd",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "node src-tauri/scripts/patch-ios-plist.mjs && npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "node src-tauri/scripts/patch-ios-plist.mjs && npm run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -35,6 +35,15 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
+    ],
+    "fileAssociations": [
+      {
+        "ext": ["md", "markdown", "mdown", "qmd"],
+        "name": "Markdown Document",
+        "role": "Editor",
+        "mimeType": "text/markdown",
+        "contentTypes": ["net.daringfireball.markdown", "public.plain-text"]
+      }
     ]
   },
   "plugins": {
