@@ -608,7 +608,9 @@ pub fn run() {
         .run(|app_handle, event| {
             // Files handed to the app via the OS "Open With" / share menu arrive
             // as RunEvent::Opened. Buffer them (for a frontend drain on launch)
-            // and emit an event for listeners already running.
+            // and emit an event for listeners already running. This variant only
+            // exists on macOS/iOS; other platforms deliver files via CLI args.
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
             if let tauri::RunEvent::Opened { urls } = event {
                 use tauri::{Emitter, Manager};
                 let paths: Vec<String> = urls
@@ -622,6 +624,12 @@ pub fn run() {
                     }
                     let _ = app_handle.emit("files-opened", paths);
                 }
+            }
+
+            // Silence unused-variable warnings on platforms without the arm above.
+            #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+            {
+                let _ = (app_handle, event);
             }
         });
 }
