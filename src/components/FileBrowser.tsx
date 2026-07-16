@@ -7,7 +7,7 @@ import {
   ChevronLeft,
   Loader2,
   AlertCircle,
-  Star,
+  Pin,
   X,
   Image as ImageIcon,
   Video as VideoIcon,
@@ -778,7 +778,7 @@ export default function FileBrowser({
       >
         <div className="sidebar-subheader">
           <span className="sidebar-section-title">
-            <Star className="w-3.5 h-3.5 text-accent" style={{ fill: "var(--accent)" }} />
+            <Pin className="w-3.5 h-3.5 text-accent" style={{ fill: "var(--accent)" }} />
             <span>Workspaces</span>
           </span>
           {storage.capabilities.documentPicker && (
@@ -831,7 +831,7 @@ export default function FileBrowser({
                   >
                     <div className="workspace-item-info">
                       {item.isDir ? (
-                        <Folder style={{ width: "15px", height: "15px", fill: "var(--accent-soft)", color: "var(--accent)" }} />
+                        <Folder style={{ width: "15px", height: "15px", color: "var(--accent)" }} />
                       ) : (
                         <FileText style={{ width: "15px", height: "15px", color: "var(--text-secondary)" }} />
                       )}
@@ -936,11 +936,8 @@ export default function FileBrowser({
                   title={pinnedWorkspaces.some((p) => p.path === currentPath) ? "Unpin current folder" : "Pin current folder"}
                   style={{ opacity: 0.8 }}
                 >
-                  <Star
-                    className={`w-3.5 h-3.5 ${pinnedWorkspaces.some((p) => p.path === currentPath) ? "pinned text-accent fill-accent" : ""}`}
-                    style={{
-                      fill: pinnedWorkspaces.some((p) => p.path === currentPath) ? "var(--accent)" : "none",
-                    }}
+                  <Pin
+                    className={`w-3.5 h-3.5 ${pinnedWorkspaces.some((p) => p.path === currentPath) ? "pinned text-accent" : ""}`}
                   />
                 </button>
               )}
@@ -1161,7 +1158,7 @@ export default function FileBrowser({
                     >
                       <span className="file-item-icon">
                         {entry.is_dir ? (
-                          <Folder style={{ width: "16px", height: "16px", fill: "var(--text-secondary)", opacity: 0.8 }} />
+                          <Folder style={{ width: "16px", height: "16px", color: "var(--text-secondary)", opacity: 0.8 }} />
                         ) : isImage ? (
                           <ImageIcon style={{ width: "16px", height: "16px" }} />
                         ) : isVideo ? (
@@ -1210,11 +1207,8 @@ export default function FileBrowser({
                           }}
                           title={isPinned ? "Remove from Workspaces" : "Pin to Workspaces"}
                         >
-                          <Star
-                            className="w-3.5 h-3.5"
-                            style={{
-                              fill: isPinned ? "var(--accent)" : "none",
-                            }}
+                          <Pin
+                            className={`w-3.5 h-3.5 ${isPinned ? "text-accent" : ""}`}
                           />
                         </button>
                       </div>
@@ -1261,7 +1255,7 @@ export default function FileBrowser({
                     >
                       <span className="file-item-icon">
                         {entry.is_dir ? (
-                          <Folder style={{ width: "16px", height: "16px", fill: "var(--text-secondary)", opacity: 0.8 }} />
+                          <Folder style={{ width: "16px", height: "16px", color: "var(--text-secondary)", opacity: 0.8 }} />
                         ) : isImage ? (
                           <ImageIcon style={{ width: "16px", height: "16px" }} />
                         ) : isVideo ? (
@@ -1297,11 +1291,8 @@ export default function FileBrowser({
                           }}
                           title={isPinned ? "Remove from Workspaces" : "Pin to Workspaces"}
                         >
-                          <Star
-                            className="w-3.5 h-3.5"
-                            style={{
-                              fill: isPinned ? "var(--accent)" : "none",
-                            }}
+                          <Pin
+                            className={`w-3.5 h-3.5 ${isPinned ? "text-accent" : ""}`}
                           />
                         </button>
                       </div>
@@ -1352,7 +1343,7 @@ export default function FileBrowser({
                           </span>
                         )}
                         {node.isDir ? (
-                          <Folder style={{ width: "16px", height: "16px", fill: "var(--text-secondary)", opacity: 0.8 }} />
+                          <Folder style={{ width: "16px", height: "16px", color: "var(--text-secondary)", opacity: 0.8 }} />
                         ) : isImage ? (
                           <ImageIcon style={{ width: "16px", height: "16px" }} />
                         ) : isVideo ? (
@@ -1388,11 +1379,8 @@ export default function FileBrowser({
                           }}
                           title={isPinned ? "Remove from Workspaces" : "Pin to Workspaces"}
                         >
-                          <Star
-                            className="w-3.5 h-3.5"
-                            style={{
-                              fill: isPinned ? "var(--accent)" : "none",
-                            }}
+                          <Pin
+                            className={`w-3.5 h-3.5 ${isPinned ? "text-accent" : ""}`}
                           />
                         </button>
                       </div>

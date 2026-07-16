@@ -6,6 +6,7 @@ import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
+import Link from "@tiptap/extension-link";
 import {
   Bold,
   Italic,
@@ -30,6 +31,27 @@ import {
   ChevronUp,
   X,
 } from "lucide-react";
+
+const resolvePath = (basePath: string, relativePath: string) => {
+  if (relativePath.startsWith('/') || relativePath.match(/^[A-Za-z]:\\/)) return relativePath;
+  
+  const isWindows = basePath.includes('\\');
+  const separator = isWindows ? '\\' : '/';
+  
+  const parts = basePath.split(separator);
+  parts.pop(); // remove filename
+  
+  const relParts = relativePath.split(/[\\/]/);
+  for (const part of relParts) {
+    if (part === '.') continue;
+    if (part === '..') {
+      parts.pop();
+    } else {
+      parts.push(part);
+    }
+  }
+  return parts.join(separator);
+};
 
 const findMatchesInDoc = (doc: any, query: string, caseSensitive = false) => {
   const matches: { from: number; to: number }[] = [];
@@ -151,6 +173,7 @@ interface MarkdownEditorProps {
   /** Shortened, storage-relative path shown under the file name (falls back to
    *  the absolute path). */
   pathLabel?: string;
+  onOpenFile?: (path: string) => void;
 }
 
 export default function MarkdownEditor({
@@ -159,6 +182,7 @@ export default function MarkdownEditor({
   onSave,
   onChange,
   pathLabel,
+  onOpenFile,
 }: MarkdownEditorProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -199,6 +223,10 @@ export default function MarkdownEditor({
       SearchHighlightExtension.configure({
         findStateRef: findStateRef,
       }),
+      Link.configure({
+        openOnClick: false,
+        autolink: true,
+      }),
     ],
     content: isMarkdown ? initialContent : "",
     editable: isMarkdown,
@@ -207,6 +235,44 @@ export default function MarkdownEditor({
       attributes: {
         class: "ProseMirror",
       },
+      handleClick(view, pos, event) {
+        if (event.metaKey || event.ctrlKey) {
+          const state = view.state;
+          const $pos = state.doc.resolve(pos);
+          const node = state.doc.nodeAt(pos) || $pos.nodeAfter || $pos.nodeBefore;
+          
+          if (node && node.marks) {
+            const linkMark = node.marks.find(m => m.type.name === 'link');
+            if (linkMark && onOpenFile) {
+              const href = linkMark.attrs.href;
+              onOpenFile(resolvePath(filePath, href));
+              event.preventDefault();
+              event.stopPropagation();
+              return true;
+            }
+          }
+          
+          // Also check text under cursor just in case it looks like a path without a link
+          if (node && node.isText && onOpenFile) {
+            const text = node.text || "";
+            const nodeStart = $pos.start() + $pos.parentOffset - (node.nodeSize - 1);
+            const localPos = Math.max(0, pos - nodeStart);
+            const leftStr = text.substring(0, localPos);
+            const rightStr = text.substring(localPos);
+            const matchLeft = leftStr.match(/([^\s"'\(\)\[\]]+)$/);
+            const matchRight = rightStr.match(/^([^\s"'\(\)\[\]]+)/);
+            const word = (matchLeft ? matchLeft[1] : '') + (matchRight ? matchRight[1] : '');
+            
+            if (word && (word.includes('.md') || word.includes('.txt') || word.includes('/'))) {
+              onOpenFile(resolvePath(filePath, word));
+              event.preventDefault();
+              event.stopPropagation();
+              return true;
+            }
+          }
+        }
+        return false;
+      }
     },
     onUpdate: ({ editor }) => {
       if (isMarkdown) {
@@ -798,6 +864,21 @@ export default function MarkdownEditor({
                 const val = e.target.value;
                 setPlainContent(val);
                 onChange?.(filePath, val);
+              }}
+              onClick={(e) => {
+                if ((e.metaKey || e.ctrlKey) && onOpenFile) {
+                  const target = e.target as HTMLTextAreaElement;
+                  const text = target.value;
+                  const pos = target.selectionStart;
+                  const leftStr = text.substring(0, pos);
+                  const rightStr = text.substring(pos);
+                  const matchLeft = leftStr.match(/([^\s"'\(\)\[\]]+)$/);
+                  const matchRight = rightStr.match(/^([^\s"'\(\)\[\]]+)/);
+                  const word = (matchLeft ? matchLeft[1] : '') + (matchRight ? matchRight[1] : '');
+                  if (word && (word.includes('.md') || word.includes('.txt') || word.includes('/'))) {
+                    onOpenFile(resolvePath(filePath, word));
+                  }
+                }
               }}
               placeholder="Plain text editor..."
               style={{

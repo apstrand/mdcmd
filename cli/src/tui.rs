@@ -5,7 +5,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
     Frame,
 };
 use crossterm::event::{self, KeyCode, KeyModifiers};
@@ -62,6 +62,10 @@ pub struct AppState {
     pub create_active: bool,
     pub create_input: String,
     pub status_message: Option<String>,
+    pub workspace_list_state: ListState,
+    pub folder_list_state: ListState,
+    pub cached_search_results: Option<Vec<FileEntry>>,
+    pub help_active: bool,
 }
 
 
@@ -111,6 +115,10 @@ impl AppState {
             create_active: false,
             create_input: String::new(),
             status_message: None,
+            workspace_list_state: ListState::default(),
+            folder_list_state: ListState::default(),
+            cached_search_results: None,
+            help_active: false,
         };
 
         app.reload_directory();
@@ -451,6 +459,10 @@ impl AppState {
             if self.current_dir != canon_parent {
                 self.current_dir = canon_parent;
                 self.reload_directory();
+                if let Some(ref q) = self.search_query {
+                    let results = self.get_search_results(q);
+                    self.cached_search_results = Some(results);
+                }
                 
                 if self.view_mode == ViewMode::Tree {
                     let mut p = parent.to_path_buf();
@@ -638,6 +650,11 @@ impl AppState {
                 }
             }
         }
+        
+        if key.code == KeyCode::Char('?') && !self.search_active && !self.create_active {
+            self.help_active = !self.help_active;
+            return true;
+        }
 
         match key.code {
             KeyCode::Char('t') => {
@@ -815,12 +832,19 @@ impl AppState {
                 }
             }
             KeyCode::Enter => {
+                let has_modifier = key.modifiers.contains(KeyModifiers::SUPER)
+                    || key.modifiers.contains(KeyModifiers::ALT)
+                    || key.modifiers.contains(KeyModifiers::META);
                 let item = &workspaces[self.workspace_index];
                 let path = PathBuf::from(&item.path);
                 if path.exists() {
                     if item.is_dir {
                         self.current_dir = path;
                         self.reload_directory();
+                        if let Some(ref q) = self.search_query {
+                            let results = self.get_search_results(q);
+                            self.cached_search_results = Some(results);
+                        }
                         self.active_section = ActiveSection::Folders;
                         self.folder_index = 0;
                         if self.view_mode == ViewMode::Tree {
@@ -828,6 +852,9 @@ impl AppState {
                         }
                     } else {
                         self.select_file(path);
+                        if has_modifier {
+                            self.active_section = ActiveSection::Viewer;
+                        }
                     }
                     self.clamp_folder_index();
                 } else {
@@ -865,8 +892,7 @@ impl AppState {
             return Ok(());
         }
 
-        if let Some(ref query) = self.search_query {
-            let results = self.get_search_results(query);
+        if let Some(ref results) = self.cached_search_results {
             match key.code {
                 KeyCode::Char('/') => {
                     self.search_active = true;
@@ -884,6 +910,9 @@ impl AppState {
                     }
                 }
                 KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
+                    let has_modifier = key.modifiers.contains(KeyModifiers::SUPER)
+                        || key.modifiers.contains(KeyModifiers::ALT)
+                        || key.modifiers.contains(KeyModifiers::META);
                     if !results.is_empty() {
                         let entry = &results[self.folder_index];
                         let path = PathBuf::from(&entry.path);
@@ -891,9 +920,13 @@ impl AppState {
                             self.current_dir = path;
                             self.reload_directory();
                             self.search_query = None;
+                            self.cached_search_results = None;
                             self.folder_index = 0;
                         } else {
                             self.select_file(path);
+                            if has_modifier {
+                                self.active_section = ActiveSection::Viewer;
+                            }
                         }
                     }
                 }
@@ -934,6 +967,14 @@ impl AppState {
                         let entry = &results[self.folder_index];
                         if !entry.is_dir {
                             let _ = open_system_default(&entry.path);
+                        }
+                    }
+                }
+                KeyCode::Char('g') => {
+                    if !results.is_empty() {
+                        let entry = &results[self.folder_index];
+                        if !entry.is_dir {
+                            let _ = open_in_gui(&entry.path);
                         }
                     }
                 }
@@ -986,6 +1027,9 @@ impl AppState {
                 }
             }
             KeyCode::Enter => {
+                let has_modifier = key.modifiers.contains(KeyModifiers::SUPER)
+                    || key.modifiers.contains(KeyModifiers::ALT)
+                    || key.modifiers.contains(KeyModifiers::META);
                 match self.view_mode {
                     ViewMode::List => {
                         if !self.entries.is_empty() {
@@ -997,6 +1041,9 @@ impl AppState {
                                 self.folder_index = 0;
                             } else {
                                 self.select_file(path);
+                                if has_modifier {
+                                    self.active_section = ActiveSection::Viewer;
+                                }
                             }
                         }
                     }
@@ -1004,11 +1051,17 @@ impl AppState {
                         let flat_tree = self.get_flat_tree();
                         if !flat_tree.is_empty() {
                             let node = &flat_tree[self.folder_index];
-                            let path = node.path.clone();
                             if node.is_dir {
-                                self.toggle_expand(path);
+                                if self.expanded_paths.contains(&node.path) {
+                                    self.expanded_paths.remove(&node.path);
+                                } else {
+                                    self.expanded_paths.insert(node.path.clone());
+                                }
                             } else {
-                                self.select_file(path);
+                                self.select_file(node.path.clone());
+                                if has_modifier {
+                                    self.active_section = ActiveSection::Viewer;
+                                }
                             }
                         }
                     }
@@ -1032,7 +1085,7 @@ impl AppState {
                         if !flat_tree.is_empty() {
                             let node = &flat_tree[self.folder_index];
                             if node.is_dir && !self.expanded_paths.contains(&node.path) {
-                                self.toggle_expand(node.path.clone());
+                                self.expanded_paths.insert(node.path.clone());
                             }
                         }
                     }
@@ -1049,7 +1102,7 @@ impl AppState {
                             let node = flat_tree[self.folder_index].clone();
                             if node.is_dir && self.expanded_paths.contains(&node.path) {
                                 // Collapse an expanded directory in place
-                                self.toggle_expand(node.path.clone());
+                                self.expanded_paths.remove(&node.path);
                             } else if let Some(parent_idx) = node
                                 .parent_path
                                 .as_ref()
@@ -1071,7 +1124,11 @@ impl AppState {
                     if !flat_tree.is_empty() {
                         let node = &flat_tree[self.folder_index];
                         if node.is_dir {
-                            self.toggle_expand(node.path.clone());
+                            if self.expanded_paths.contains(&node.path) {
+                                self.expanded_paths.remove(&node.path);
+                            } else {
+                                self.expanded_paths.insert(node.path.clone());
+                            }
                         }
                     }
                 }
@@ -1179,6 +1236,39 @@ impl AppState {
                     let _ = open_system_default(&path);
                 }
             }
+            KeyCode::Char('g') => {
+                let path_opt = match self.view_mode {
+                    ViewMode::List => {
+                        if !self.entries.is_empty() {
+                            let entry = &self.entries[self.folder_index];
+                            if !entry.is_dir {
+                                Some(entry.path.clone())
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    }
+                    ViewMode::Tree => {
+                        let flat_tree = self.get_flat_tree();
+                        if !flat_tree.is_empty() {
+                            let node = &flat_tree[self.folder_index];
+                            if !node.is_dir {
+                                Some(node.path.to_string_lossy().into_owned())
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    }
+                };
+
+                if let Some(path) = path_opt {
+                    let _ = open_in_gui(&path);
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -1191,6 +1281,7 @@ impl AppState {
         }
 
         match key.code {
+            KeyCode::Char('?') => self.help_active = !self.help_active,
             KeyCode::Down | KeyCode::Char('j') => {
                 self.scroll_offset = self.scroll_offset.saturating_add(1);
             }
@@ -1214,6 +1305,11 @@ impl AppState {
             KeyCode::Char('o') | KeyCode::Enter => {
                 if let Some(ref file_path) = self.selected_file {
                     let _ = open_system_default(&file_path.to_string_lossy());
+                }
+            }
+            KeyCode::Char('g') => {
+                if let Some(ref file_path) = self.selected_file {
+                    let _ = open_in_gui(&file_path.to_string_lossy());
                 }
             }
             KeyCode::Char('w') | KeyCode::Char('c') => {
@@ -1277,7 +1373,7 @@ impl AppState {
         Ok(())
     }
 
-    pub fn draw(&self, f: &mut Frame<'_>) {
+    pub fn draw(&mut self, f: &mut Frame<'_>) {
         let rect = f.size();
 
         let border_active_color = self.palette.border_active;
@@ -1355,7 +1451,8 @@ impl AppState {
         let workspaces_list = List::new(list_items)
             .block(workspaces_block);
             
-        f.render_widget(workspaces_list, sidebar_chunks[0]);
+        self.workspace_list_state.select(Some(self.workspace_index));
+        f.render_stateful_widget(workspaces_list, sidebar_chunks[0], &mut self.workspace_list_state);
 
         // Render Directory Folders
         let folders_border_color = if self.active_section == ActiveSection::Folders {
@@ -1367,8 +1464,7 @@ impl AppState {
         let mut folder_items = Vec::new();
         let path_str = self.current_dir.to_string_lossy().into_owned();
         
-        if let Some(ref query) = self.search_query {
-            let results = self.get_search_results(query);
+        if let Some(ref results) = self.cached_search_results {
             for (i, entry) in results.iter().enumerate() {
                 let is_selected = i == self.folder_index && self.active_section == ActiveSection::Folders;
                 let is_currently_open = self.selected_file.as_ref()
@@ -1525,7 +1621,8 @@ impl AppState {
         let folders_list = List::new(folder_items)
             .block(folders_block);
 
-        f.render_widget(folders_list, sidebar_chunks[1]);
+        self.folder_list_state.select(Some(self.folder_index));
+        f.render_stateful_widget(folders_list, sidebar_chunks[1], &mut self.folder_list_state);
 
         // Render Tabs and Content area
         let content_area = if !self.open_files.is_empty() {
@@ -1588,7 +1685,12 @@ impl AppState {
             .borders(Borders::ALL)
             .border_style(Style::default().fg(viewer_border_color));
 
-        if let Some(ref file_path) = self.selected_file {
+        if self.help_active {
+            let viewer_block = viewer_block.title("📄 Help & Keyboard Shortcuts");
+            let landing_text = self.get_welcome_text(accent_color, border_inactive_color, text_primary_color, text_secondary_color);
+            let paragraph = Paragraph::new(landing_text).block(viewer_block);
+            f.render_widget(paragraph, content_area);
+        } else if let Some(ref file_path) = self.selected_file {
             let path_str = file_path.to_string_lossy();
             let title = file_path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             
@@ -1634,89 +1736,7 @@ impl AppState {
         } else {
             let viewer_block = viewer_block.title("📄 Welcome");
             
-            let landing_text = vec![
-                Line::from(""),
-                Line::from(vec![
-                    Span::styled("    MarkDown Commander (mdc) TUI", Style::default().fg(accent_color).add_modifier(Modifier::BOLD))
-                ]),
-                Line::from(vec![
-                    Span::styled("    ──────────────────────", Style::default().fg(border_inactive_color))
-                ]),
-                Line::from(""),
-                Line::from(vec![
-                    Span::styled("    No File Open.", Style::default().fg(text_primary_color).add_modifier(Modifier::BOLD))
-                ]),
-                Line::from("    Select a Markdown (.md) or Media file from the folders list to view it."),
-                Line::from(""),
-                Line::from(vec![
-                    Span::styled("    Keybindings:", Style::default().add_modifier(Modifier::BOLD).fg(self.palette.code))
-                ]),
-                Line::from(vec![
-                    Span::styled("    Tab / Shift-Tab : ", Style::default().fg(text_secondary_color)),
-                    Span::styled("Cycle focus between panels", Style::default().fg(text_primary_color))
-                ]),
-                Line::from(vec![
-                    Span::styled("    [ / ]           : ", Style::default().fg(text_secondary_color)),
-                    Span::styled("Cycle active tabs", Style::default().fg(text_primary_color))
-                ]),
-                Line::from(vec![
-                    Span::styled("    Ctrl-1..9       : ", Style::default().fg(text_secondary_color)),
-                    Span::styled("Switch active file tabs (1-9)", Style::default().fg(text_primary_color))
-                ]),
-                Line::from(vec![
-                    Span::styled("    Ctrl-Shift-1..9 : ", Style::default().fg(text_secondary_color)),
-                    Span::styled("Activate pinned workspace item (1-9)", Style::default().fg(text_primary_color))
-                ]),
-                Line::from(vec![
-                    Span::styled("    w / c           : ", Style::default().fg(text_secondary_color)),
-                    Span::styled("Close active file/tab (Viewer)", Style::default().fg(text_primary_color))
-                ]),
-                Line::from(vec![
-                    Span::styled("    t               : ", Style::default().fg(text_secondary_color)),
-                    Span::styled("Open terminal in current directory", Style::default().fg(text_primary_color))
-                ]),
-                Line::from(vec![
-                    Span::styled("    n               : ", Style::default().fg(text_secondary_color)),
-                    Span::styled("Create a new file in current directory", Style::default().fg(text_primary_color))
-                ]),
-                Line::from(vec![
-                    Span::styled("    y / Y           : ", Style::default().fg(text_secondary_color)),
-                    Span::styled("Copy selected file path / name to clipboard", Style::default().fg(text_primary_color))
-                ]),
-                Line::from(vec![
-                    Span::styled("    j / k / Arrows  : ", Style::default().fg(text_secondary_color)),
-                    Span::styled("Navigate lists and scroll viewer", Style::default().fg(text_primary_color))
-                ]),
-                Line::from(vec![
-                    Span::styled("    Enter           : ", Style::default().fg(text_secondary_color)),
-                    Span::styled("Navigate folder / Expand node / Open file", Style::default().fg(text_primary_color))
-                ]),
-                Line::from(vec![
-                    Span::styled("    Backspace / u   : ", Style::default().fg(text_secondary_color)),
-                    Span::styled("Navigate to parent directory", Style::default().fg(text_primary_color))
-                ]),
-                Line::from(vec![
-                    Span::styled("    p               : ", Style::default().fg(text_secondary_color)),
-                    Span::styled("Pin/Unpin current folder/file to Workspaces", Style::default().fg(text_primary_color))
-                ]),
-                Line::from(vec![
-                    Span::styled("    v               : ", Style::default().fg(text_secondary_color)),
-                    Span::styled("Toggle Folders view mode (Tree / List)", Style::default().fg(text_primary_color))
-                ]),
-                Line::from(vec![
-                    Span::styled("    e               : ", Style::default().fg(text_secondary_color)),
-                    Span::styled("Edit markdown file in terminal $EDITOR", Style::default().fg(text_primary_color))
-                ]),
-                Line::from(vec![
-                    Span::styled("    o               : ", Style::default().fg(text_secondary_color)),
-                    Span::styled("Open selected file in host default GUI app", Style::default().fg(text_primary_color))
-                ]),
-                Line::from(vec![
-                    Span::styled("    Esc / q         : ", Style::default().fg(text_secondary_color)),
-                    Span::styled("Quit application", Style::default().fg(text_primary_color))
-                ]),
-                Line::from(""),
-            ];
+            let landing_text = self.get_welcome_text(accent_color, border_inactive_color, text_primary_color, text_secondary_color);
             let paragraph = Paragraph::new(landing_text)
                 .block(viewer_block);
             f.render_widget(paragraph, content_area);
@@ -1777,6 +1797,8 @@ impl AppState {
                 Span::styled(" Edit |", Style::default().fg(help_fg)),
                 Span::styled(" o", Style::default().fg(key_color).add_modifier(Modifier::BOLD)),
                 Span::styled(" Open Ext |", Style::default().fg(help_fg)),
+                Span::styled(" g", Style::default().fg(key_color).add_modifier(Modifier::BOLD)),
+                Span::styled(" Open GUI |", Style::default().fg(help_fg)),
                 Span::styled(" q/Esc", Style::default().fg(key_color).add_modifier(Modifier::BOLD)),
                 Span::styled(" Quit", Style::default().fg(help_fg)),
             ];
@@ -1784,6 +1806,107 @@ impl AppState {
             let help_paragraph = Paragraph::new(help_line).style(Style::default().bg(help_bg));
             f.render_widget(help_paragraph, main_chunks[1]);
         }
+    }
+
+    pub fn get_welcome_text(&self, accent_color: Color, border_inactive_color: Color, text_primary_color: Color, text_secondary_color: Color) -> Vec<Line<'static>> {
+        vec![
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("    MarkDown Commander (mdc) TUI", Style::default().fg(accent_color).add_modifier(Modifier::BOLD))
+            ]),
+            Line::from(vec![
+                Span::styled("    ──────────────────────", Style::default().fg(border_inactive_color))
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("    No File Open.", Style::default().fg(text_primary_color).add_modifier(Modifier::BOLD))
+            ]),
+            Line::from("    Select a Markdown (.md) or Media file from the folders list to view it."),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("    Keybindings:", Style::default().add_modifier(Modifier::BOLD).fg(self.palette.code))
+            ]),
+            Line::from(vec![
+                Span::styled("    ?               : ", Style::default().fg(text_secondary_color)),
+                Span::styled("Toggle this help screen", Style::default().fg(text_primary_color))
+            ]),
+            Line::from(vec![
+                Span::styled("    Tab / Shift-Tab : ", Style::default().fg(text_secondary_color)),
+                Span::styled("Cycle focus between panels", Style::default().fg(text_primary_color))
+            ]),
+            Line::from(vec![
+                Span::styled("    [ / ]           : ", Style::default().fg(text_secondary_color)),
+                Span::styled("Cycle active tabs", Style::default().fg(text_primary_color))
+            ]),
+            Line::from(vec![
+                Span::styled("    Ctrl-1..9       : ", Style::default().fg(text_secondary_color)),
+                Span::styled("Switch active file tabs (1-9)", Style::default().fg(text_primary_color))
+            ]),
+            Line::from(vec![
+                Span::styled("    Ctrl-Shift-1..9 : ", Style::default().fg(text_secondary_color)),
+                Span::styled("Activate pinned workspace item (1-9)", Style::default().fg(text_primary_color))
+            ]),
+            Line::from(vec![
+                Span::styled("    w / c           : ", Style::default().fg(text_secondary_color)),
+                Span::styled("Close active file/tab (Viewer)", Style::default().fg(text_primary_color))
+            ]),
+            Line::from(vec![
+                Span::styled("    t               : ", Style::default().fg(text_secondary_color)),
+                Span::styled("Open terminal in current directory", Style::default().fg(text_primary_color))
+            ]),
+            Line::from(vec![
+                Span::styled("    n               : ", Style::default().fg(text_secondary_color)),
+                Span::styled("Create a new file in current directory", Style::default().fg(text_primary_color))
+            ]),
+            Line::from(vec![
+                Span::styled("    y / Y           : ", Style::default().fg(text_secondary_color)),
+                Span::styled("Copy selected file path / name to clipboard", Style::default().fg(text_primary_color))
+            ]),
+            Line::from(vec![
+                Span::styled("    j / k / Arrows  : ", Style::default().fg(text_secondary_color)),
+                Span::styled("Navigate lists and scroll viewer", Style::default().fg(text_primary_color))
+            ]),
+            Line::from(vec![
+                Span::styled("    Enter           : ", Style::default().fg(text_secondary_color)),
+                Span::styled("Navigate folder / Expand node / Open file", Style::default().fg(text_primary_color))
+            ]),
+            Line::from(vec![
+                Span::styled("    Cmd/Alt-Enter   : ", Style::default().fg(text_secondary_color)),
+                Span::styled("Open and focus file", Style::default().fg(text_primary_color))
+            ]),
+            Line::from(vec![
+                Span::styled("    Backspace / u   : ", Style::default().fg(text_secondary_color)),
+                Span::styled("Navigate to parent directory", Style::default().fg(text_primary_color))
+            ]),
+            Line::from(vec![
+                Span::styled("    p               : ", Style::default().fg(text_secondary_color)),
+                Span::styled("Pin/Unpin current folder/file to Workspaces", Style::default().fg(text_primary_color))
+            ]),
+            Line::from(vec![
+                Span::styled("    /               : ", Style::default().fg(text_secondary_color)),
+                Span::styled("Search current folder", Style::default().fg(text_primary_color))
+            ]),
+            Line::from(vec![
+                Span::styled("    e               : ", Style::default().fg(text_secondary_color)),
+                Span::styled("Edit current Markdown file (opens external editor)", Style::default().fg(text_primary_color))
+            ]),
+            Line::from(vec![
+                Span::styled("    o               : ", Style::default().fg(text_secondary_color)),
+                Span::styled("Open file in external default application", Style::default().fg(text_primary_color))
+            ]),
+            Line::from(vec![
+                Span::styled("    g               : ", Style::default().fg(text_secondary_color)),
+                Span::styled("Open file in MarkDown Commander GUI", Style::default().fg(text_primary_color))
+            ]),
+            Line::from(vec![
+                Span::styled("    v               : ", Style::default().fg(text_secondary_color)),
+                Span::styled("Toggle Folder view mode (List/Tree)", Style::default().fg(text_primary_color))
+            ]),
+            Line::from(vec![
+                Span::styled("    Ctrl-q          : ", Style::default().fg(text_secondary_color)),
+                Span::styled("Quit application", Style::default().fg(text_primary_color))
+            ]),
+        ]
     }
 }
 
@@ -1834,6 +1957,22 @@ pub fn open_system_default(path: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn open_in_gui(path: &str) -> Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open").args(&["-a", "MarkDown Commander", path]).status()?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd").args(&["/C", "start", "", "MarkDown Commander.exe", path]).status()?;
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        std::process::Command::new("mdcmd").arg(path).status()?;
+    }
+    Ok(())
+}
+
 pub fn list_directory(path: &Path) -> Result<Vec<FileEntry>> {
     if !path.exists() {
         return Err(anyhow::anyhow!("Directory does not exist: {}", path.display()));
@@ -1878,7 +2017,10 @@ pub fn list_directory(path: &Path) -> Result<Vec<FileEntry>> {
     Ok(entries)
 }
 
-fn symbol_to_digit(c: char) -> Option<char> {
+
+
+
+pub fn symbol_to_digit(c: char) -> Option<char> {
     match c {
         '!' => Some('1'),
         '@' => Some('2'),
@@ -1892,4 +2034,3 @@ fn symbol_to_digit(c: char) -> Option<char> {
         _ => None,
     }
 }
-

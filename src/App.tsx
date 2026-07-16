@@ -793,6 +793,7 @@ export default function App() {
                 initialContent={filesData[selectedFile]?.currentContent || ""}
                 onSave={handleSaveFile}
                 onChange={handleContentChange}
+                onOpenFile={handleSelectFile}
               />
             )
           ) : (
