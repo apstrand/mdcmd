@@ -38,7 +38,45 @@ fi
 # 2. Check and prepare system dependencies based on OS
 if [ "$OS" = "Darwin" ]; then
   echo "Verifying macOS compilation targets..."
-  
+
+  # --- Code signing + notarization -----------------------------------------
+  # Load local signing secrets (gitignored). See .env.signing.example.
+  if [ -f ".env.signing" ]; then
+    echo "Loading signing configuration from .env.signing..."
+    set -a
+    # shellcheck disable=SC1091
+    . ./.env.signing
+    set +a
+  fi
+
+  if [ -n "$APPLE_SIGNING_IDENTITY" ]; then
+    echo "Code signing enabled: $APPLE_SIGNING_IDENTITY"
+    if ! security find-identity -v -p codesigning | grep -qF "$APPLE_SIGNING_IDENTITY"; then
+      echo "ERROR: signing identity not found in the keychain:"
+      echo "  $APPLE_SIGNING_IDENTITY"
+      echo "Available identities:"
+      security find-identity -v -p codesigning || true
+      exit 1
+    fi
+    export APPLE_SIGNING_IDENTITY
+
+    if [ -n "$APPLE_API_KEY" ] && [ -n "$APPLE_API_ISSUER" ] && [ -n "$APPLE_API_KEY_PATH" ]; then
+      if [ ! -f "$APPLE_API_KEY_PATH" ]; then
+        echo "ERROR: APPLE_API_KEY_PATH does not point to a file: $APPLE_API_KEY_PATH"
+        exit 1
+      fi
+      export APPLE_API_KEY APPLE_API_ISSUER APPLE_API_KEY_PATH
+      echo "Notarization enabled (App Store Connect API key $APPLE_API_KEY)."
+    else
+      echo "WARNING: signing without notarization. Downloaded builds will still"
+      echo "         show a Gatekeeper warning. Set APPLE_API_* in .env.signing"
+      echo "         to enable notarization + stapling."
+    fi
+  else
+    echo "WARNING: APPLE_SIGNING_IDENTITY not set - building UNSIGNED."
+    echo "         Copy .env.signing.example to .env.signing to enable signing."
+  fi
+
   # Check if rustup is installed to add targets
   if command -v rustup &> /dev/null; then
     echo "Adding macOS targets for universal binary..."

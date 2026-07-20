@@ -14,6 +14,11 @@ dist-ssr
 *.local
 .env
 .env.local
+.env.signing
+
+# Apple code-signing / notarization secrets (never commit)
+*.p12
+*.p8
 
 # Editor directories and files
 .vscode/*
