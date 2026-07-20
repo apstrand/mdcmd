@@ -1817,6 +1817,17 @@ impl AppState {
             Line::from(vec![
                 Span::styled("    ──────────────────────", Style::default().fg(border_inactive_color))
             ]),
+            Line::from(vec![
+                Span::styled(
+                    format!(
+                        "    v{}  ·  commit {}  ·  {}",
+                        env!("CARGO_PKG_VERSION"),
+                        env!("GIT_HASH"),
+                        env!("GIT_COMMIT_DATE"),
+                    ),
+                    Style::default().fg(text_secondary_color),
+                )
+            ]),
             Line::from(""),
             Line::from(vec![
                 Span::styled("    No File Open.", Style::default().fg(text_primary_color).add_modifier(Modifier::BOLD))

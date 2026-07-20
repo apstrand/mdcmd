@@ -29,6 +29,12 @@ interface PinnedItem {
   isDir: boolean;
 }
 
+interface VersionInfo {
+  version: string;
+  commit: string;
+  commitDate: string;
+}
+
 interface FileBrowserProps {
   currentPath: string;
   setCurrentPath: (path: string) => void;
@@ -59,6 +65,11 @@ export default function FileBrowser({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Detailed build/version info shown in the sidebar footer. Only the native
+  // (Tauri) build exposes the `app_version_info` command; the web build leaves
+  // this null and the footer is hidden.
+  const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
+
   // New-file creation state
   const [creatingFile, setCreatingFile] = useState(false);
   const [newFileName, setNewFileName] = useState("");
@@ -85,6 +96,14 @@ export default function FileBrowser({
   useEffect(() => {
     localStorage.setItem("tauri-markdown-workspace-ratio", String(workspaceHeightPercent));
   }, [workspaceHeightPercent]);
+
+  // Fetch build/version info once (native builds only).
+  useEffect(() => {
+    if (storage.id !== "tauri") return;
+    invoke<VersionInfo>("app_version_info")
+      .then(setVersionInfo)
+      .catch(() => {});
+  }, []);
 
   // Focus sidebar on mount
   useEffect(() => {
@@ -1392,6 +1411,20 @@ export default function FileBrowser({
           )}
         </div>
       </div>
+
+      {/* Version box: app version plus the git commit the build came from. */}
+      {versionInfo && (
+        <div
+          className="sidebar-footer"
+          title={`mdcmd v${versionInfo.version}\ncommit ${versionInfo.commit}\ncommitted ${versionInfo.commitDate}`}
+        >
+          <span className="sidebar-footer-version">v{versionInfo.version}</span>
+          <span className="sidebar-footer-sep">·</span>
+          <span className="sidebar-footer-commit">{versionInfo.commit}</span>
+          <span className="sidebar-footer-sep">·</span>
+          <span className="sidebar-footer-date">{versionInfo.commitDate}</span>
+        </div>
+      )}
     </div>
   );
 }

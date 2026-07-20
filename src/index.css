@@ -180,6 +180,31 @@ body {
   background-color: var(--bg-secondary);
 }
 
+/* Version box pinned to the bottom of the sidebar. */
+.sidebar-footer {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  background-color: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  overflow: hidden;
+  cursor: default;
+}
+
+.sidebar-footer-commit,
+.sidebar-footer-date {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+}
+
+.sidebar-footer-sep {
+  opacity: 0.5;
+}
+
 /* Sidebar split sections */
 .sidebar-section {
   display: flex;

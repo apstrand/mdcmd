@@ -30,6 +30,15 @@ struct PinnedItem {
     is_dir: bool,
 }
 
+/// Detailed build/version info surfaced in the GUI's version box.
+#[derive(Serialize, Debug)]
+struct VersionInfo {
+    version: String,
+    commit: String,
+    #[serde(rename = "commitDate")]
+    commit_date: String,
+}
+
 /// Path of the config file shared with the CLI/TUI (mdcmd/config.json).
 fn config_file_path() -> Option<PathBuf> {
     dirs::config_dir().map(|mut p| {
@@ -498,6 +507,17 @@ fn close_pty(session_id: String, state: tauri::State<'_, PtyState>) -> Result<()
     }
 }
 
+/// Report the app version plus the git commit (and its date) the build came
+/// from. Available on both desktop and mobile.
+#[tauri::command]
+fn app_version_info() -> VersionInfo {
+    VersionInfo {
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        commit: env!("GIT_HASH").to_string(),
+        commit_date: env!("GIT_COMMIT_DATE").to_string(),
+    }
+}
+
 #[cfg(desktop)]
 #[tauri::command]
 async fn check_for_updates(app: tauri::AppHandle) -> Result<Option<String>, String> {
@@ -579,7 +599,8 @@ pub fn run() {
             close_pty,
             check_for_updates,
             download_and_install_update,
-            drain_opened_files
+            drain_opened_files,
+            app_version_info
         ]);
 
     // iOS gets the native folder picker (UIDocumentPicker + security-scoped
@@ -599,7 +620,8 @@ pub fn run() {
         read_workspaces,
         write_workspaces,
         search_directory,
-        drain_opened_files
+        drain_opened_files,
+        app_version_info
     ]);
 
     builder
