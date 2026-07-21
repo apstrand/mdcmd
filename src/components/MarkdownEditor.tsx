@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { useEditor, EditorContent, Extension } from "@tiptap/react";
+import { useEditor, EditorContent, Extension, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "tiptap-markdown";
 import TaskList from "@tiptap/extension-task-list";
@@ -165,6 +165,17 @@ const SearchHighlightExtension = Extension.create({
   },
 });
 
+// tiptap-markdown's `markdown` storage is occasionally missing for a tick
+// while the editor is being (re)created or torn down. Reading it directly
+// (`editor.storage.markdown.getMarkdown()`) then throws "undefined is not an
+// object"; when that happens during a React render it unmounts the whole tree
+// and leaves a blank white window. Return null when the storage isn't ready so
+// callers can fall back to the plain-text content instead of crashing.
+function getEditorMarkdown(editor: Editor | null): string | null {
+  const markdown = (editor?.storage as { markdown?: { getMarkdown?: () => string } } | undefined)?.markdown;
+  return typeof markdown?.getMarkdown === "function" ? markdown.getMarkdown() : null;
+}
+
 interface MarkdownEditorProps {
   filePath: string;
   initialContent: string;
@@ -276,7 +287,8 @@ export default function MarkdownEditor({
     },
     onUpdate: ({ editor }) => {
       if (isMarkdown) {
-        const md = (editor.storage as any).markdown.getMarkdown();
+        const md = getEditorMarkdown(editor);
+        if (md === null) return;
         setPlainContent(md);
         onChange?.(filePath, md);
       }
@@ -293,8 +305,8 @@ export default function MarkdownEditor({
   // Sync plain text content back to Tiptap editor when switching to rich mode
   useEffect(() => {
     if (editMode === "rich" && editor) {
-      const currentMd = (editor.storage as any).markdown.getMarkdown();
-      if (currentMd !== plainContent) {
+      const currentMd = getEditorMarkdown(editor);
+      if (currentMd !== null && currentMd !== plainContent) {
         editor.commands.setContent(plainContent);
       }
     }
@@ -415,9 +427,11 @@ export default function MarkdownEditor({
     
     if (editMode === "rich" && editor) {
       replaceAllInDoc(editor, query, replacement, findState.caseSensitive);
-      const md = (editor.storage as any).markdown.getMarkdown();
-      setPlainContent(md);
-      onChange?.(filePath, md);
+      const md = getEditorMarkdown(editor);
+      if (md !== null) {
+        setPlainContent(md);
+        onChange?.(filePath, md);
+      }
     } else {
       const regex = new RegExp(escapeRegExp(query), findState.caseSensitive ? 'g' : 'gi');
       const newContent = plainContent.replace(regex, replacement);
@@ -444,7 +458,7 @@ export default function MarkdownEditor({
     let contentToSave = "";
     if (isMarkdown) {
       if (editMode === "rich" && editor) {
-        contentToSave = (editor.storage as any).markdown.getMarkdown();
+        contentToSave = getEditorMarkdown(editor) ?? plainContent;
       } else {
         contentToSave = plainContent;
       }
@@ -474,8 +488,8 @@ export default function MarkdownEditor({
 
   const handleToggleMode = (mode: "rich" | "plain") => {
     if (mode === "plain") {
-      if (editor) {
-        const md = (editor.storage as any).markdown.getMarkdown();
+      const md = getEditorMarkdown(editor);
+      if (md !== null) {
         setPlainContent(md);
       }
     }
