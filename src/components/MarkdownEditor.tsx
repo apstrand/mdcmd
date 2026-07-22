@@ -30,7 +30,17 @@ import {
   ChevronDown,
   ChevronUp,
   X,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
+
+const ZOOM_MIN = 0.6;
+const ZOOM_MAX = 2.5;
+const ZOOM_STEP = 0.1;
+const ZOOM_STORAGE_KEY = "mdcmd-editor-zoom";
+
+const clampZoom = (z: number) =>
+  Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 10) / 10));
 
 const resolvePath = (basePath: string, relativePath: string) => {
   if (relativePath.startsWith('/') || relativePath.match(/^[A-Za-z]:\\/)) return relativePath;
@@ -198,6 +208,29 @@ export default function MarkdownEditor({
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [editMode, setEditMode] = useState<"rich" | "plain">("rich");
+
+  // Zoom level for the markdown/plain content area. Shared across files and
+  // persisted so it survives reopening a file or restarting the app.
+  const [zoom, setZoom] = useState<number>(() => {
+    try {
+      const saved = Number(localStorage.getItem(ZOOM_STORAGE_KEY));
+      return saved ? clampZoom(saved) : 1;
+    } catch {
+      return 1;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(ZOOM_STORAGE_KEY, String(zoom));
+    } catch {
+      // ignore quota / private-mode failures
+    }
+  }, [zoom]);
+
+  const zoomIn = () => setZoom((z) => clampZoom(z + ZOOM_STEP));
+  const zoomOut = () => setZoom((z) => clampZoom(z - ZOOM_STEP));
+  const zoomReset = () => setZoom(1);
 
   const isMarkdown = filePath.toLowerCase().endsWith(".md") || filePath.toLowerCase().endsWith(".qmd");
   const isEditable = true;
@@ -650,6 +683,41 @@ export default function MarkdownEditor({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
+  // Keyboard zoom: Cmd/Ctrl with '+'/'=' zooms in, '-' out, '0' resets.
+  useEffect(() => {
+    const handleZoomKeys = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
+      if (e.key === "+" || e.key === "=") {
+        e.preventDefault();
+        setZoom((z) => clampZoom(z + ZOOM_STEP));
+      } else if (e.key === "-" || e.key === "_") {
+        e.preventDefault();
+        setZoom((z) => clampZoom(z - ZOOM_STEP));
+      } else if (e.key === "0") {
+        e.preventDefault();
+        setZoom(1);
+      }
+    };
+    window.addEventListener("keydown", handleZoomKeys);
+    return () => window.removeEventListener("keydown", handleZoomKeys);
+  }, []);
+
+  // Ctrl/Cmd + mouse wheel (or trackpad pinch, which browsers report as a
+  // ctrlKey wheel event) zooms the content area. React's onWheel is passive, so
+  // attach a native non-passive listener to allow preventDefault.
+  useEffect(() => {
+    const el = editorContainerRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      const delta = e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP;
+      setZoom((z) => clampZoom(z + delta));
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+
   if (isMarkdown && !editor) {
     return (
       <div style={{ display: "flex", flexGrow: 1, alignItems: "center", justifyContent: "center", color: "var(--text-secondary)" }}>
@@ -720,6 +788,23 @@ export default function MarkdownEditor({
               </button>
             </div>
           )}
+
+          <div className="zoom-controls" title="Zoom (Cmd/Ctrl +/-/0, Cmd/Ctrl + scroll)">
+            <button className="zoom-btn" onClick={zoomOut} title="Zoom out" aria-label="Zoom out">
+              <ZoomOut className="w-4 h-4" />
+            </button>
+            <button
+              className="zoom-level"
+              onClick={zoomReset}
+              title="Reset zoom"
+              aria-label="Reset zoom"
+            >
+              {Math.round(zoom * 100)}%
+            </button>
+            <button className="zoom-btn" onClick={zoomIn} title="Zoom in" aria-label="Zoom in">
+              <ZoomIn className="w-4 h-4" />
+            </button>
+          </div>
 
           <div className="save-status">
             {isEditable ? (
@@ -960,6 +1045,7 @@ export default function MarkdownEditor({
         className="editor-container"
         ref={editorContainerRef}
         onScroll={(e) => rememberScroll(e.currentTarget.scrollTop)}
+        style={{ ["--editor-zoom" as any]: zoom }}
       >
         <div className="editor-wrapper">
           {isMarkdown && editMode === "rich" ? (
@@ -1001,7 +1087,7 @@ export default function MarkdownEditor({
                 background: "transparent",
                 color: "var(--text-primary)",
                 fontFamily: "var(--font-mono, 'Fira Code', 'JetBrains Mono', Courier, monospace)",
-                fontSize: "14px",
+                fontSize: `${14 * zoom}px`,
                 lineHeight: "1.6",
                 whiteSpace: "pre-wrap",
                 padding: "20px 28px",

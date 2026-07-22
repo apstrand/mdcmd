@@ -27,12 +27,14 @@ ARGS:
     <PATH>    Directory or file to open (defaults to the current directory)
 
 OPTIONS:
+    -g, --gui        Open the file (or current directory) in the MarkDown Commander GUI and exit
     -h, --help       Print help information
     -v, --version    Print version information";
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
+    let mut launch_gui = false;
     for arg in &args[1..] {
         match arg.as_str() {
             "-h" | "--help" => {
@@ -43,11 +45,22 @@ fn main() -> Result<()> {
                 println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
                 return Ok(());
             }
+            "-g" | "--gui" => launch_gui = true,
             _ => {}
         }
     }
 
     let path_arg = args[1..].iter().find(|a| !a.starts_with('-'));
+
+    // `--gui` hands off to the desktop app instead of starting the TUI. If a
+    // path was given, open it; otherwise just launch the app.
+    if launch_gui {
+        match path_arg {
+            Some(arg) => tui::open_in_gui(arg)?,
+            None => tui::launch_gui()?,
+        }
+        return Ok(());
+    }
     let initial_path = if let Some(arg) = path_arg {
         let path = PathBuf::from(arg);
         if path.exists() {

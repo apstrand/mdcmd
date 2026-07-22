@@ -5,7 +5,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, Borders, List, ListItem, ListState, Padding, Paragraph, Wrap},
     Frame,
 };
 use crossterm::event::{self, KeyCode, KeyModifiers};
@@ -66,6 +66,7 @@ pub struct AppState {
     pub folder_list_state: ListState,
     pub cached_search_results: Option<Vec<FileEntry>>,
     pub help_active: bool,
+    pub fullscreen: bool,
 }
 
 
@@ -119,6 +120,7 @@ impl AppState {
             folder_list_state: ListState::default(),
             cached_search_results: None,
             help_active: false,
+            fullscreen: false,
         };
 
         app.reload_directory();
@@ -223,6 +225,7 @@ impl AppState {
         }
     }
 
+    #[allow(dead_code)]
     pub fn toggle_expand(&mut self, path: PathBuf) {
         if self.expanded_paths.contains(&path) {
             self.expanded_paths.remove(&path);
@@ -1276,6 +1279,23 @@ impl AppState {
 
 
     fn handle_key_viewer(&mut self, key: event::KeyEvent) -> Result<()> {
+        // Fullscreen reading mode: 'f' toggles it, Esc leaves it. Handle these
+        // before the global keys so Esc doesn't quit the app while fullscreen.
+        if self.fullscreen {
+            match key.code {
+                KeyCode::Char('f') | KeyCode::Esc => {
+                    self.fullscreen = false;
+                    self.needs_clear = true;
+                    return Ok(());
+                }
+                _ => {}
+            }
+        } else if key.code == KeyCode::Char('f') && self.selected_file.is_some() {
+            self.fullscreen = true;
+            self.needs_clear = true;
+            return Ok(());
+        }
+
         if self.handle_global_keys(key) {
             return Ok(());
         }
@@ -1382,6 +1402,13 @@ impl AppState {
         let text_secondary_color = self.palette.text_secondary;
         let accent_color = self.palette.accent;
         let accent_soft_color = self.palette.accent_soft;
+
+        // Fullscreen reading mode: no sidebar, no borders, no status bar — just
+        // the file content filling the whole terminal (with a small margin).
+        if self.fullscreen {
+            self.draw_fullscreen(f, rect, text_primary_color, text_secondary_color, accent_color);
+            return;
+        }
 
         let main_chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -1808,6 +1835,73 @@ impl AppState {
         }
     }
 
+    /// Render the currently selected file's content across the entire terminal
+    /// with no sidebar, borders or status bar (see the `f` key in the viewer).
+    fn draw_fullscreen(
+        &self,
+        f: &mut Frame<'_>,
+        area: ratatui::layout::Rect,
+        text_primary_color: Color,
+        text_secondary_color: Color,
+        accent_color: Color,
+    ) {
+        // A little breathing room so text isn't glued to the terminal edges.
+        let block = Block::default().padding(Padding::new(2, 2, 1, 0));
+
+        let path_str = self
+            .selected_file
+            .as_ref()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let title = self
+            .selected_file
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+
+        if is_media_file(&path_str) {
+            let media_type = if is_video_file(&title) { "Video" } else { "Image" };
+            let media_lines = vec![
+                Line::from(""),
+                Line::from(vec![Span::styled(
+                    format!("🎞️ Media File: {}", title),
+                    Style::default().add_modifier(Modifier::BOLD).fg(self.palette.code),
+                )]),
+                Line::from(vec![Span::styled(
+                    format!("Type: {}", media_type),
+                    Style::default().fg(text_secondary_color),
+                )]),
+                Line::from(vec![Span::styled(
+                    format!("Location: {}", path_str),
+                    Style::default().fg(text_secondary_color),
+                )]),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("Press ", Style::default().fg(text_secondary_color)),
+                    Span::styled("f", Style::default().add_modifier(Modifier::BOLD).fg(accent_color)),
+                    Span::styled(" or ", Style::default().fg(text_secondary_color)),
+                    Span::styled("Esc", Style::default().add_modifier(Modifier::BOLD).fg(accent_color)),
+                    Span::styled(" to exit fullscreen.", Style::default().fg(text_secondary_color)),
+                ]),
+            ];
+            f.render_widget(Paragraph::new(media_lines).block(block), area);
+        } else if let Some(ref text) = self.file_content {
+            let paragraph = Paragraph::new(text.clone())
+                .block(block)
+                .scroll((self.scroll_offset as u16, 0))
+                .wrap(Wrap { trim: false });
+            f.render_widget(paragraph, area);
+        } else {
+            let paragraph = Paragraph::new(vec![Line::from(Span::styled(
+                "No content loaded.",
+                Style::default().fg(text_primary_color),
+            ))])
+            .block(block);
+            f.render_widget(paragraph, area);
+        }
+    }
+
     pub fn get_welcome_text(&self, accent_color: Color, border_inactive_color: Color, text_primary_color: Color, text_secondary_color: Color) -> Vec<Line<'static>> {
         vec![
             Line::from(""),
@@ -1914,6 +2008,10 @@ impl AppState {
                 Span::styled("Toggle Folder view mode (List/Tree)", Style::default().fg(text_primary_color))
             ]),
             Line::from(vec![
+                Span::styled("    f               : ", Style::default().fg(text_secondary_color)),
+                Span::styled("Toggle fullscreen reading mode (Viewer; f/Esc to exit)", Style::default().fg(text_primary_color))
+            ]),
+            Line::from(vec![
                 Span::styled("    Ctrl-q          : ", Style::default().fg(text_secondary_color)),
                 Span::styled("Quit application", Style::default().fg(text_primary_color))
             ]),
@@ -1980,6 +2078,23 @@ pub fn open_in_gui(path: &str) -> Result<()> {
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         std::process::Command::new("mdcmd").arg(path).status()?;
+    }
+    Ok(())
+}
+
+/// Launch the MarkDown Commander GUI with no file (used by `mdc --gui`).
+pub fn launch_gui() -> Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open").args(&["-a", "MarkDown Commander"]).status()?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd").args(&["/C", "start", "", "MarkDown Commander.exe"]).status()?;
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        std::process::Command::new("mdcmd").status()?;
     }
     Ok(())
 }

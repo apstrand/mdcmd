@@ -284,6 +284,28 @@ fn open_terminal(path: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Open a fresh app window (Cmd/Ctrl+N). Each window gets a unique label so
+/// several can be open at once; the capability glob `main*` grants them the
+/// same command permissions as the primary window.
+#[cfg(desktop)]
+#[tauri::command]
+fn open_new_window(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri::{WebviewUrl, WebviewWindowBuilder};
+    let label = format!(
+        "main-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0)
+    );
+    WebviewWindowBuilder::new(&app, &label, WebviewUrl::default())
+        .title("MarkDown Commander")
+        .inner_size(800.0, 600.0)
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[tauri::command]
 fn search_directory(path: String, query: String) -> Result<Vec<FileEntry>, String> {
     let root = Path::new(&path);
@@ -592,6 +614,7 @@ pub fn run() {
             read_workspaces,
             write_workspaces,
             open_terminal,
+            open_new_window,
             search_directory,
             spawn_pty,
             write_to_pty,

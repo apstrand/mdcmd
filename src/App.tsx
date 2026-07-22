@@ -7,6 +7,7 @@ import MediaViewer from "./components/MediaViewer";
 import TerminalPane from "./components/TerminalPane";
 import { storage } from "./storage";
 import { displayRelativePath } from "./utils/paths";
+import { computeLineDiff, diffStats } from "./utils/diff";
 import { FileCode, Loader2, X, AlertCircle, RefreshCw, Copy, Type, ChevronLeft } from "lucide-react";
 
 // True for the desktop (Tauri) build; false for the static web / Dropbox build.
@@ -68,7 +69,18 @@ export default function App() {
     onConfirm: () => void | Promise<void>;
     onDiscard?: () => void | Promise<void>;
     onCancel?: () => void;
+    // When present, the dialog can reveal a saved-vs-current line diff.
+    diff?: { savedContent: string; currentContent: string };
   } | null>(null);
+
+  // Whether the diff panel inside the confirm dialog is expanded.
+  const [showDiff, setShowDiff] = useState(false);
+
+  // Compute the diff only while the panel is open, and memoize on the content.
+  const diffLines = useMemo(() => {
+    if (!showDiff || !confirmDialog?.diff) return null;
+    return computeLineDiff(confirmDialog.diff.savedContent, confirmDialog.diff.currentContent);
+  }, [showDiff, confirmDialog]);
 
   const filesDataRef = useRef(filesData);
   useEffect(() => {
@@ -133,12 +145,16 @@ export default function App() {
       );
 
       if (dirtyFiles.length > 0) {
+        setShowDiff(false);
         setConfirmDialog({
           isOpen: true,
           title: "Unsaved Changes",
           message: dirtyFiles.length === 1
             ? `"${getFileName(dirtyFiles[0][0])}" has unsaved changes. Do you want to save them before quitting?`
             : `You have unsaved changes in ${dirtyFiles.length} files. Do you want to save them before quitting?`,
+          diff: dirtyFiles.length === 1
+            ? { savedContent: dirtyFiles[0][1].savedContent, currentContent: dirtyFiles[0][1].currentContent }
+            : undefined,
           onConfirm: async () => {
             try {
               await Promise.all(
@@ -378,10 +394,15 @@ export default function App() {
     };
 
     if (isDirty) {
+      setShowDiff(false);
       setConfirmDialog({
         isOpen: true,
         title: "Unsaved Changes",
         message: `"${getFileName(pathToRemove)}" has unsaved changes. Do you want to save them before closing?`,
+        diff: {
+          savedContent: filesData[pathToRemove].savedContent,
+          currentContent: filesData[pathToRemove].currentContent,
+        },
         onConfirm: async () => {
           try {
             const content = filesData[pathToRemove].currentContent;
@@ -580,6 +601,19 @@ export default function App() {
     window.addEventListener("keydown", handleNumberShortcuts);
     return () => window.removeEventListener("keydown", handleNumberShortcuts);
   }, [openTabs, sortedPinned]);
+
+  // Keyboard shortcut Cmd+N / Ctrl+N to open a new app window (desktop only)
+  useEffect(() => {
+    if (!isDesktop) return;
+    const handleNewWindow = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "n") {
+        e.preventDefault();
+        invoke("open_new_window").catch((err) => console.error("Failed to open new window:", err));
+      }
+    };
+    window.addEventListener("keydown", handleNewWindow);
+    return () => window.removeEventListener("keydown", handleNewWindow);
+  }, []);
 
   // Keyboard shortcut Ctrl+` to toggle the terminal panel
   useEffect(() => {
@@ -835,9 +869,47 @@ export default function App() {
       {/* Custom Confirm Modal Dialog */}
       {confirmDialog && confirmDialog.isOpen && (
         <div className="confirm-modal-overlay">
-          <div className="confirm-modal">
+          <div className={`confirm-modal${showDiff && confirmDialog.diff ? " with-diff" : ""}`}>
             <h3>{confirmDialog.title}</h3>
             <p>{confirmDialog.message}</p>
+            {confirmDialog.diff && (
+              <div className="confirm-diff-section">
+                <button
+                  className="confirm-diff-toggle"
+                  onClick={() => setShowDiff((v) => !v)}
+                >
+                  {showDiff ? "Hide changes" : "View changes"}
+                  {(() => {
+                    if (showDiff || !confirmDialog.diff) return null;
+                    const stats = diffStats(
+                      computeLineDiff(confirmDialog.diff.savedContent, confirmDialog.diff.currentContent)
+                    );
+                    return (
+                      <span className="confirm-diff-stats">
+                        <span className="diff-added">+{stats.added}</span>
+                        <span className="diff-removed">−{stats.removed}</span>
+                      </span>
+                    );
+                  })()}
+                </button>
+                {showDiff && diffLines && (
+                  <div className="confirm-diff-view">
+                    {diffLines.length === 0 ? (
+                      <div className="diff-empty">No line changes</div>
+                    ) : (
+                      diffLines.map((line, idx) => (
+                        <div key={idx} className={`diff-line diff-${line.type}`}>
+                          <span className="diff-gutter">
+                            {line.type === "add" ? "+" : line.type === "del" ? "−" : " "}
+                          </span>
+                          <span className="diff-text">{line.text || " "}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
             <div className="confirm-modal-actions">
               <button 
                 className="confirm-btn-primary" 
