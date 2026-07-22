@@ -17,10 +17,39 @@ mod tui;
 
 use tui::AppState;
 
+const HELP: &str = "\
+mdc — Terminal file browser and Markdown viewer
+
+USAGE:
+    mdc [OPTIONS] [PATH]
+
+ARGS:
+    <PATH>    Directory or file to open (defaults to the current directory)
+
+OPTIONS:
+    -h, --help       Print help information
+    -v, --version    Print version information";
+
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
-    let initial_path = if args.len() > 1 {
-        let path = PathBuf::from(&args[1]);
+
+    for arg in &args[1..] {
+        match arg.as_str() {
+            "-h" | "--help" => {
+                println!("{HELP}");
+                return Ok(());
+            }
+            "-v" | "--version" => {
+                println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+                return Ok(());
+            }
+            _ => {}
+        }
+    }
+
+    let path_arg = args[1..].iter().find(|a| !a.starts_with('-'));
+    let initial_path = if let Some(arg) = path_arg {
+        let path = PathBuf::from(arg);
         if path.exists() {
             Some(path)
         } else {
