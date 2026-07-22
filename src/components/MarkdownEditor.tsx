@@ -204,6 +204,38 @@ export default function MarkdownEditor({
 
   const [plainContent, setPlainContent] = useState(initialContent);
 
+  // Per-file scroll position: remember where the user was and restore it when
+  // the file is reopened (from an argument, a tab, or the file browser). A file
+  // that was never opened has no saved position, so it starts at the top instead
+  // of jumping to the end (see autofocus below).
+  const editorContainerRef = useRef<HTMLDivElement>(null);
+  const plainTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const scrollStorageKey = `mdcmd-scroll:${filePath}`;
+  const latestScrollRef = useRef(0);
+  const scrollFlushRef = useRef<number | null>(null);
+
+  const readSavedScroll = () => {
+    try {
+      return Number(localStorage.getItem(scrollStorageKey)) || 0;
+    } catch {
+      return 0;
+    }
+  };
+
+  // Throttle writes so scrolling doesn't hammer localStorage on every event.
+  const rememberScroll = (top: number) => {
+    latestScrollRef.current = top;
+    if (scrollFlushRef.current != null) return;
+    scrollFlushRef.current = window.setTimeout(() => {
+      scrollFlushRef.current = null;
+      try {
+        localStorage.setItem(scrollStorageKey, String(latestScrollRef.current));
+      } catch {
+        // ignore quota / private-mode failures
+      }
+    }, 150);
+  };
+
   const [findState, setFindState] = useState<{
     isOpen: boolean;
     searchQuery: string;
@@ -241,7 +273,9 @@ export default function MarkdownEditor({
     ],
     content: isMarkdown ? initialContent : "",
     editable: isMarkdown,
-    autofocus: isMarkdown ? 'end' : false,
+    // Scrolling is handled by the scroll-restore effects below; don't force the
+    // cursor (and viewport) to the end of the document on open.
+    autofocus: false,
     editorProps: {
       attributes: {
         class: "ProseMirror",
@@ -294,6 +328,62 @@ export default function MarkdownEditor({
       }
     }
   });
+
+  // Restore the saved scroll position for the rich editor once it is ready.
+  // No saved value means "never opened before" -> stay at the top (0).
+  useEffect(() => {
+    if (!editor || editMode !== "rich") return;
+    const el = editorContainerRef.current;
+    if (!el) return;
+    const saved = readSavedScroll();
+    latestScrollRef.current = saved;
+    // Two frames: the first lets ProseMirror lay out the content, the second
+    // applies the scroll once the real height is known.
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        el.scrollTop = saved;
+        // Allow typing without ProseMirror yanking the viewport to the cursor.
+        editor.commands.focus(undefined, { scrollIntoView: false });
+      });
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor]);
+
+  // Restore the saved scroll position for the plain-text / non-markdown view.
+  useEffect(() => {
+    const usesTextarea = !isMarkdown || editMode === "plain";
+    if (!usesTextarea) return;
+    const el = plainTextareaRef.current;
+    if (!el) return;
+    const saved = readSavedScroll();
+    latestScrollRef.current = saved;
+    const raf = requestAnimationFrame(() => {
+      el.scrollTop = saved;
+    });
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editMode]);
+
+  // Flush the latest scroll position when the file closes / another is opened.
+  useEffect(() => {
+    return () => {
+      if (scrollFlushRef.current != null) {
+        clearTimeout(scrollFlushRef.current);
+        scrollFlushRef.current = null;
+      }
+      try {
+        localStorage.setItem(scrollStorageKey, String(latestScrollRef.current));
+      } catch {
+        // ignore quota / private-mode failures
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scrollStorageKey]);
 
   // Declaratively update ProseMirror search highlights when findState changes or editor is re-attached
   useEffect(() => {
@@ -866,14 +956,20 @@ export default function MarkdownEditor({
         </div>
       )}
 
-      <div className="editor-container">
+      <div
+        className="editor-container"
+        ref={editorContainerRef}
+        onScroll={(e) => rememberScroll(e.currentTarget.scrollTop)}
+      >
         <div className="editor-wrapper">
           {isMarkdown && editMode === "rich" ? (
             <EditorContent editor={editor} />
           ) : (
             <textarea
               className="plain-text-editor"
+              ref={plainTextareaRef}
               value={plainContent}
+              onScroll={(e) => rememberScroll(e.currentTarget.scrollTop)}
               onChange={(e) => {
                 const val = e.target.value;
                 setPlainContent(val);

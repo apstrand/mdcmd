@@ -1221,6 +1221,14 @@ body {
 .text-secondary { color: var(--text-secondary); }
 .fill-accent { fill: var(--accent); }
 
+/* Tauri's macOS webview (WebKit) shrinks inline SVGs that are flex children
+   down to a sliver, so the lucide icons render as tiny dots. Nearly every icon
+   here lives in a `display: flex` container (headers, file rows, buttons), so
+   pin them to their intrinsic box and never let flexbox compress them. */
+svg.lucide {
+  flex-shrink: 0;
+}
+
 /* Terminal Resizer */
 .terminal-resizer {
   height: 4px;
