@@ -692,6 +692,10 @@ export default function App() {
         sortedPinned={sortedPinned}
         viewMode={viewMode}
         setViewMode={setViewMode}
+        onUpdateFound={(version) => {
+          setUpdateVersion(version);
+          setUpdateDismissed(false);
+        }}
       />
 
       {/* Vertical Drag Resizer Handle */}

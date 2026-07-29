@@ -16,6 +16,7 @@ import {
   List,
   FilePlus,
   FolderPlus,
+  MoreVertical,
 } from "lucide-react";
 
 interface FileEntry {
@@ -46,6 +47,7 @@ interface FileBrowserProps {
   sortedPinned: PinnedItem[];
   viewMode: "list" | "tree";
   setViewMode: (mode: "list" | "tree") => void;
+  onUpdateFound?: (version: string) => void;
 }
 
 export default function FileBrowser({
@@ -59,11 +61,14 @@ export default function FileBrowser({
   sortedPinned,
   viewMode,
   setViewMode,
+  onUpdateFound,
 }: FileBrowserProps) {
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [sortOrder, setSortOrder] = useState<"name" | "mtime">("name");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
 
   // Detailed build/version info shown in the sidebar footer. Only the native
   // (Tauri) build exposes the `app_version_info` command; the web build leaves
@@ -781,6 +786,67 @@ export default function FileBrowser({
           <button className="sidebar-action-btn" title="Open file" onClick={() => document.getElementById("file-picker")?.click()}>
             <FilePlus className="w-4 h-4" />
           </button>
+          <div style={{ position: "relative" }}>
+            <button className="sidebar-action-btn" title="Menu" onClick={() => setMenuOpen(!menuOpen)}>
+              <MoreVertical className="w-4 h-4" />
+            </button>
+            {menuOpen && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "100%",
+                  right: 0,
+                  marginTop: "4px",
+                  background: "var(--bg-secondary)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "6px",
+                  padding: "4px",
+                  zIndex: 100,
+                  boxShadow: "0 4px 12px rgba(0, 0, 0, 0.2)",
+                  minWidth: "160px",
+                }}
+              >
+                <button
+                  style={{
+                    width: "100%",
+                    textAlign: "left",
+                    padding: "6px 12px",
+                    background: "transparent",
+                    border: "none",
+                    color: "var(--text)",
+                    fontSize: "13px",
+                    cursor: "pointer",
+                    borderRadius: "4px",
+                  }}
+                  onMouseOver={(e) => (e.currentTarget.style.background = "var(--bg-hover)")}
+                  onMouseOut={(e) => (e.currentTarget.style.background = "transparent")}
+                  onClick={async () => {
+                    setMenuOpen(false);
+                    if (!storage.capabilities.updater) {
+                      alert(`Current version: ${versionInfo?.version || "unknown"}\n(Updates not supported in this environment)`);
+                      return;
+                    }
+                    setIsCheckingUpdate(true);
+                    try {
+                      const version = await invoke<string | null>("check_for_updates");
+                      if (version) {
+                        if (onUpdateFound) onUpdateFound(version);
+                      } else {
+                        alert(`Current version is ${versionInfo?.version || "unknown"}. No new updates available.`);
+                      }
+                    } catch (err) {
+                      alert(`Error checking for updates: ${err}`);
+                    } finally {
+                      setIsCheckingUpdate(false);
+                    }
+                  }}
+                  disabled={isCheckingUpdate}
+                >
+                  {isCheckingUpdate ? "Checking..." : "Check for Updates"}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
