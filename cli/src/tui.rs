@@ -981,6 +981,18 @@ impl AppState {
                         }
                     }
                 }
+                KeyCode::Char('f') => {
+                    if !results.is_empty() {
+                        let entry = &results[self.folder_index];
+                        if !entry.is_dir {
+                            let path = PathBuf::from(&entry.path);
+                            self.select_file(path);
+                            self.active_section = ActiveSection::Viewer;
+                            self.fullscreen = true;
+                            self.needs_clear = true;
+                        }
+                    }
+                }
                 _ => {}
             }
             return Ok(());
@@ -1270,6 +1282,42 @@ impl AppState {
 
                 if let Some(path) = path_opt {
                     let _ = open_in_gui(&path);
+                }
+            }
+            KeyCode::Char('f') => {
+                let node_opt = match self.view_mode {
+                    ViewMode::List => {
+                        if !self.entries.is_empty() {
+                            let entry = &self.entries[self.folder_index];
+                            if !entry.is_dir {
+                                Some(PathBuf::from(&entry.path))
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    }
+                    ViewMode::Tree => {
+                        let flat_tree = self.get_flat_tree();
+                        if !flat_tree.is_empty() {
+                            let node = &flat_tree[self.folder_index];
+                            if !node.is_dir {
+                                Some(node.path.clone())
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    }
+                };
+
+                if let Some(path) = node_opt {
+                    self.select_file(path);
+                    self.active_section = ActiveSection::Viewer;
+                    self.fullscreen = true;
+                    self.needs_clear = true;
                 }
             }
             _ => {}
