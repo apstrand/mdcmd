@@ -579,6 +579,54 @@ fn drain_opened_files(state: tauri::State<'_, OpenedFiles>) -> Vec<String> {
     std::mem::take(&mut *files)
 }
 
+// Build the desktop menu. This mirrors Tauri's default menu but rebinds the
+// "Close Window" item to Cmd/Ctrl+Shift+W, leaving plain Cmd/Ctrl+W free for
+// the in-app "close tab" shortcut handled by the frontend.
+#[cfg(desktop)]
+fn build_app_menu<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> tauri::Result<tauri::menu::Menu<R>> {
+    use tauri::menu::{AboutMetadata, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+
+    let close_window = MenuItemBuilder::new("Close Window")
+        .id("close_window")
+        .accelerator("CmdOrCtrl+Shift+W")
+        .build(app)?;
+
+    let app_menu = SubmenuBuilder::new(app, "App")
+        .about(Some(AboutMetadata::default()))
+        .separator()
+        .services()
+        .separator()
+        .hide()
+        .hide_others()
+        .show_all()
+        .separator()
+        .quit()
+        .build()?;
+
+    let edit_menu = SubmenuBuilder::new(app, "Edit")
+        .undo()
+        .redo()
+        .separator()
+        .cut()
+        .copy()
+        .paste()
+        .select_all()
+        .build()?;
+
+    let window_menu = SubmenuBuilder::new(app, "Window")
+        .minimize()
+        .maximize()
+        .separator()
+        .item(&close_window)
+        .build()?;
+
+    MenuBuilder::new(app)
+        .items(&[&app_menu, &edit_menu, &window_menu])
+        .build()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Files passed on the command line (e.g. `mdcmd notes.md`). macOS "Open
@@ -602,6 +650,19 @@ pub fn run() {
     // Desktop registers the terminal/window-state/updater plugins and commands.
     #[cfg(desktop)]
     let builder = builder
+        .menu(build_app_menu)
+        .on_menu_event(|app, event| {
+            use tauri::Manager;
+            if event.id() == "close_window" {
+                if let Some(window) = app
+                    .webview_windows()
+                    .values()
+                    .find(|w| w.is_focused().unwrap_or(false))
+                {
+                    let _ = window.close();
+                }
+            }
+        })
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(PtyState::default())
