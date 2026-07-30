@@ -66,6 +66,7 @@ pub struct AppState {
     pub folder_list_state: ListState,
     pub cached_search_results: Option<Vec<FileEntry>>,
     pub help_active: bool,
+    pub gui_missing_active: bool,
     pub fullscreen: bool,
 }
 
@@ -120,6 +121,7 @@ impl AppState {
             folder_list_state: ListState::default(),
             cached_search_results: None,
             help_active: false,
+            gui_missing_active: false,
             fullscreen: false,
         };
 
@@ -600,6 +602,19 @@ impl AppState {
         Ok(())
     }
 
+    /// Open `path` in the MarkDown Commander GUI. If the GUI app is not
+    /// installed, show an info panel with a download link and install steps
+    /// instead of silently failing.
+    fn open_gui(&mut self, path: &str) {
+        if is_gui_installed() {
+            if let Err(e) = open_in_gui(path) {
+                self.error = Some(format!("Failed to launch GUI: {}", e));
+            }
+        } else {
+            self.gui_missing_active = true;
+        }
+    }
+
     pub fn handle_key(&mut self, key: event::KeyEvent) -> Result<()> {
         self.status_message = None;
 
@@ -610,6 +625,12 @@ impl AppState {
 
         if self.search_active {
             self.handle_key_search_input(key)?;
+            return Ok(());
+        }
+
+        // Any key dismisses the "GUI not installed" info panel.
+        if self.gui_missing_active {
+            self.gui_missing_active = false;
             return Ok(());
         }
 
@@ -977,7 +998,8 @@ impl AppState {
                     if !results.is_empty() {
                         let entry = &results[self.folder_index];
                         if !entry.is_dir {
-                            let _ = open_in_gui(&entry.path);
+                            let path = entry.path.clone();
+                            self.open_gui(&path);
                         }
                     }
                 }
@@ -1281,7 +1303,7 @@ impl AppState {
                 };
 
                 if let Some(path) = path_opt {
-                    let _ = open_in_gui(&path);
+                    self.open_gui(&path);
                 }
             }
             KeyCode::Char('f') => {
@@ -1376,8 +1398,8 @@ impl AppState {
                 }
             }
             KeyCode::Char('g') => {
-                if let Some(ref file_path) = self.selected_file {
-                    let _ = open_in_gui(&file_path.to_string_lossy());
+                if let Some(file_path) = self.selected_file.clone() {
+                    self.open_gui(&file_path.to_string_lossy());
                 }
             }
             KeyCode::Char('w') | KeyCode::Char('c') => {
@@ -1760,7 +1782,12 @@ impl AppState {
             .borders(Borders::ALL)
             .border_style(Style::default().fg(viewer_border_color));
 
-        if self.help_active {
+        if self.gui_missing_active {
+            let viewer_block = viewer_block.title("🖥️  MarkDown Commander GUI not installed");
+            let info_text = self.get_gui_missing_text(accent_color, text_primary_color, text_secondary_color);
+            let paragraph = Paragraph::new(info_text).block(viewer_block).wrap(Wrap { trim: false });
+            f.render_widget(paragraph, content_area);
+        } else if self.help_active {
             let viewer_block = viewer_block.title("📄 Help & Keyboard Shortcuts");
             let landing_text = self.get_welcome_text(accent_color, border_inactive_color, text_primary_color, text_secondary_color);
             let paragraph = Paragraph::new(landing_text).block(viewer_block);
@@ -1950,6 +1977,53 @@ impl AppState {
         }
     }
 
+    /// Info panel shown when the user presses `g` but the MarkDown Commander
+    /// desktop app isn't installed: points at the GitHub releases page and
+    /// summarises how to install per platform.
+    pub fn get_gui_missing_text(&self, accent_color: Color, text_primary_color: Color, text_secondary_color: Color) -> Vec<Line<'static>> {
+        let bold = Style::default().fg(text_primary_color).add_modifier(Modifier::BOLD);
+        let body = Style::default().fg(text_secondary_color);
+        let key = Style::default().fg(accent_color).add_modifier(Modifier::BOLD);
+        vec![
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("  The MarkDown Commander desktop (GUI) app doesn't appear to be installed.", bold),
+            ]),
+            Line::from(vec![
+                Span::styled("  The ", body),
+                Span::styled("g", key),
+                Span::styled(" shortcut opens the selected file in that app.", body),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("  Download the latest release from:", body),
+            ]),
+            Line::from(vec![
+                Span::styled("    https://github.com/apstrand/mdcmd/releases", key),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("  Install:", bold),
+            ]),
+            Line::from(vec![
+                Span::styled("    • macOS:   ", key),
+                Span::styled("open the .dmg and drag \"MarkDown Commander\" to /Applications", body),
+            ]),
+            Line::from(vec![
+                Span::styled("    • Windows: ", key),
+                Span::styled("run the .msi / .exe installer", body),
+            ]),
+            Line::from(vec![
+                Span::styled("    • Linux:   ", key),
+                Span::styled("install the .AppImage/.deb, or run `cargo install mdcmd`", body),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("  Press any key to dismiss.", body),
+            ]),
+        ]
+    }
+
     pub fn get_welcome_text(&self, accent_color: Color, border_inactive_color: Color, text_primary_color: Color, text_secondary_color: Color) -> Vec<Line<'static>> {
         vec![
             Line::from(""),
@@ -2112,6 +2186,42 @@ pub fn open_system_default(path: &str) -> Result<()> {
         std::process::Command::new("xdg-open").arg(path).status()?;
     }
     Ok(())
+}
+
+/// Best-effort check for whether the MarkDown Commander desktop (GUI) app is
+/// installed, so we can point the user at the download page if it isn't.
+pub fn is_gui_installed() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        let mut candidates = vec![PathBuf::from("/Applications/MarkDown Commander.app")];
+        if let Some(home) = dirs::home_dir() {
+            candidates.push(home.join("Applications/MarkDown Commander.app"));
+        }
+        candidates.iter().any(|p| p.exists())
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let mut candidates: Vec<PathBuf> = Vec::new();
+        for var in ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"] {
+            if let Ok(base) = std::env::var(var) {
+                candidates.push(
+                    PathBuf::from(&base)
+                        .join("MarkDown Commander")
+                        .join("MarkDown Commander.exe"),
+                );
+            }
+        }
+        candidates.iter().any(|p| p.exists())
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        // On Linux the GUI is launched via the `mdcmd` binary on PATH.
+        if let Ok(path) = std::env::var("PATH") {
+            std::env::split_paths(&path).any(|dir| dir.join("mdcmd").exists())
+        } else {
+            false
+        }
+    }
 }
 
 pub fn open_in_gui(path: &str) -> Result<()> {
