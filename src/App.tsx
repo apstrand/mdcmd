@@ -509,6 +509,28 @@ export default function App() {
     return () => window.removeEventListener("keydown", handleCmdW);
   }, []);
 
+  // Disable the webview's native zoom, which is far too easy to trigger by
+  // accident: Cmd/Ctrl + scroll and trackpad pinch (which WebKit reports as
+  // ctrl-key wheel events and `gesture*` events). The app has its own editor
+  // zoom controls, so nothing here is lost.
+  useEffect(() => {
+    const preventZoomWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) e.preventDefault();
+    };
+    const preventGesture = (e: Event) => e.preventDefault();
+
+    window.addEventListener("wheel", preventZoomWheel, { passive: false });
+    window.addEventListener("gesturestart", preventGesture);
+    window.addEventListener("gesturechange", preventGesture);
+    window.addEventListener("gestureend", preventGesture);
+    return () => {
+      window.removeEventListener("wheel", preventZoomWheel);
+      window.removeEventListener("gesturestart", preventGesture);
+      window.removeEventListener("gesturechange", preventGesture);
+      window.removeEventListener("gestureend", preventGesture);
+    };
+  }, []);
+
   // Keyboard shortcut Cmd+Shift+C / Ctrl+Shift+C to copy the active file's path
   useEffect(() => {
     const handleCopyPath = (e: KeyboardEvent) => {
