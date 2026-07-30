@@ -5,9 +5,12 @@ set -e
 
 # Parse command line options
 SKIP_DMG=false
+INSTALL=false
 for arg in "$@"; do
   if [ "$arg" = "--no-dmg" ] || [ "$arg" = "-n" ]; then
     SKIP_DMG=true
+  elif [ "$arg" = "--install" ] || [ "$arg" = "-i" ]; then
+    INSTALL=true
   fi
 done
 
@@ -16,6 +19,9 @@ echo "============================================="
 echo "        Tauri Release Build Script           "
 if [ "$SKIP_DMG" = true ]; then
   echo "        (DMG bundling is disabled)           "
+fi
+if [ "$INSTALL" = true ]; then
+  echo "        (Installing after build)             "
 fi
 echo "============================================="
 
@@ -181,7 +187,51 @@ else
   exit 1
 fi
 
-# 3. Report completed outputs
+# 3. Optionally install the freshly built package
+if [ "$INSTALL" = true ]; then
+  echo "---------------------------------------------"
+  echo "Installing built package..."
+
+  if [ "$OS" = "Darwin" ]; then
+    APP_BUNDLE="$(find "$RELEASES_DIR" -maxdepth 1 -type d -name "*.app" -print -quit)"
+    if [ -z "$APP_BUNDLE" ]; then
+      echo "ERROR: No .app bundle found in $RELEASES_DIR to install."
+      exit 1
+    fi
+    APP_NAME="$(basename "$APP_BUNDLE")"
+    DEST="/Applications/$APP_NAME"
+    echo "Installing $APP_NAME to /Applications..."
+    rm -rf "$DEST"
+    cp -R "$APP_BUNDLE" "$DEST"
+    echo "Installed to $DEST"
+
+  elif [ "$OS" = "Linux" ]; then
+    DEB_PKG="$(find "$RELEASES_DIR" -maxdepth 1 -type f -name "*.deb" -print -quit)"
+    if [ -n "$DEB_PKG" ]; then
+      echo "Installing $DEB_PKG (requires sudo)..."
+      if command -v apt-get &> /dev/null; then
+        sudo apt-get install -y "$DEB_PKG"
+      else
+        sudo dpkg -i "$DEB_PKG"
+      fi
+      echo "Installed $DEB_PKG"
+    else
+      APPIMAGE="$(find "$RELEASES_DIR" -maxdepth 1 -type f -name "*.AppImage" -print -quit)"
+      if [ -n "$APPIMAGE" ]; then
+        DEST="$HOME/.local/bin/$(basename "$APPIMAGE")"
+        mkdir -p "$HOME/.local/bin"
+        cp "$APPIMAGE" "$DEST"
+        chmod +x "$DEST"
+        echo "Installed AppImage to $DEST"
+      else
+        echo "ERROR: No .deb or .AppImage found in $RELEASES_DIR to install."
+        exit 1
+      fi
+    fi
+  fi
+fi
+
+# 4. Report completed outputs
 echo "---------------------------------------------"
 echo "Build complete! Output binaries in $RELEASES_DIR:"
 ls -la "$RELEASES_DIR"
