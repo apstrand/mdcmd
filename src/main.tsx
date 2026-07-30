@@ -15,7 +15,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
           background: "var(--accent)", color: "white", padding: "8px", 
           textAlign: "center", fontSize: "14px", fontWeight: 500, flexShrink: 0
         }}>
-          Like MarkDown Commander? Check out the <a href="https://github.com/apstrand/mdcmd" style={{ color: "white", textDecoration: "underline" }}>GitHub repo</a> or install the <a href="https://crates.io/crates/mdcmd" style={{ color: "white", textDecoration: "underline" }}>Rust crate</a>!
+          Like MarkDown Commander? Check out the <a href="https://github.com/apstrand/mdcmd" style={{ color: "white", textDecoration: "underline" }}>GitHub repo</a> or install the <a href="https://crates.io/crates/mdc" style={{ color: "white", textDecoration: "underline" }}>Rust crate</a>!
         </div>
       )}
       <div style={{ flexGrow: 1, position: "relative", minHeight: 0, display: "flex", flexDirection: "column" }}>
