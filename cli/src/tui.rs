@@ -2,10 +2,10 @@ use std::path::{Path, PathBuf};
 use std::fs;
 use std::io::Write;
 use ratatui::{
-    layout::{Constraint, Direction, Layout},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, List, ListItem, ListState, Padding, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Padding, Paragraph, Wrap},
     Frame,
 };
 use crossterm::event::{self, KeyCode, KeyModifiers};
@@ -631,6 +631,12 @@ impl AppState {
         // Any key dismisses the "GUI not installed" info panel.
         if self.gui_missing_active {
             self.gui_missing_active = false;
+            return Ok(());
+        }
+
+        // While the help box is open, Esc closes it rather than quitting.
+        if self.help_active && key.code == KeyCode::Esc {
+            self.help_active = false;
             return Ok(());
         }
 
@@ -1782,17 +1788,7 @@ impl AppState {
             .borders(Borders::ALL)
             .border_style(Style::default().fg(viewer_border_color));
 
-        if self.gui_missing_active {
-            let viewer_block = viewer_block.title("🖥️  MarkDown Commander GUI not installed");
-            let info_text = self.get_gui_missing_text(accent_color, text_primary_color, text_secondary_color);
-            let paragraph = Paragraph::new(info_text).block(viewer_block).wrap(Wrap { trim: false });
-            f.render_widget(paragraph, content_area);
-        } else if self.help_active {
-            let viewer_block = viewer_block.title("📄 Help & Keyboard Shortcuts");
-            let landing_text = self.get_welcome_text(accent_color, border_inactive_color, text_primary_color, text_secondary_color);
-            let paragraph = Paragraph::new(landing_text).block(viewer_block);
-            f.render_widget(paragraph, content_area);
-        } else if let Some(ref file_path) = self.selected_file {
+        if let Some(ref file_path) = self.selected_file {
             let path_str = file_path.to_string_lossy();
             let title = file_path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             
@@ -1835,13 +1831,35 @@ impl AppState {
                     .block(viewer_block);
                 f.render_widget(paragraph, content_area);
             }
+        } else if self.help_active || self.gui_missing_active {
+            // A notice will be overlaid below; keep a plain backdrop so we don't
+            // show the welcome text twice.
+            f.render_widget(viewer_block, content_area);
         } else {
             let viewer_block = viewer_block.title("📄 Welcome");
-            
+
             let landing_text = self.get_welcome_text(accent_color, border_inactive_color, text_primary_color, text_secondary_color);
             let paragraph = Paragraph::new(landing_text)
                 .block(viewer_block);
             f.render_widget(paragraph, content_area);
+        }
+
+        // Overlay notices (help, GUI-missing) as a distinct floating panel on
+        // top of whatever is in the viewer, so they don't look like files.
+        if self.gui_missing_active {
+            self.render_notice(
+                f,
+                content_area,
+                "🖥️  MarkDown Commander GUI not installed",
+                self.get_gui_missing_text(accent_color, text_primary_color, text_secondary_color),
+            );
+        } else if self.help_active {
+            self.render_notice(
+                f,
+                content_area,
+                "❔ Help & Keyboard Shortcuts",
+                self.get_welcome_text(accent_color, border_inactive_color, text_primary_color, text_secondary_color),
+            );
         }
 
         // Render Help/Status Bar at bottom
@@ -1975,6 +1993,39 @@ impl AppState {
             .block(block);
             f.render_widget(paragraph, area);
         }
+    }
+
+    /// Render a "notice" (help, GUI-missing, …) as a centered floating panel,
+    /// styled distinctly from the file viewer: a double-lined accent border and
+    /// a filled background, drawn on top of the current viewer content.
+    fn render_notice(&self, f: &mut Frame<'_>, area: Rect, title: &str, lines: Vec<Line<'static>>) {
+        let accent = self.palette.accent;
+        let bg = self.palette.code_bg;
+
+        // Size the box to its content, capped to the available area.
+        let content_h = lines.len() as u16 + 4; // borders + vertical padding
+        let box_h = content_h.min(area.height).max(3);
+        let box_w = ((area.width * 8) / 10).clamp(20, 84).min(area.width);
+        let x = area.x + area.width.saturating_sub(box_w) / 2;
+        let y = area.y + area.height.saturating_sub(box_h) / 2;
+        let popup = Rect::new(x, y, box_w, box_h);
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Double)
+            .border_style(Style::default().fg(accent).add_modifier(Modifier::BOLD))
+            .title(Span::styled(
+                format!(" {} ", title),
+                Style::default().fg(accent).add_modifier(Modifier::BOLD),
+            ))
+            .style(Style::default().bg(bg))
+            .padding(Padding::symmetric(2, 1));
+
+        f.render_widget(Clear, popup);
+        f.render_widget(
+            Paragraph::new(lines).block(block).wrap(Wrap { trim: false }),
+            popup,
+        );
     }
 
     /// Info panel shown when the user presses `g` but the MarkDown Commander
