@@ -570,18 +570,27 @@ impl AppState {
 
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         {
-            // On Linux, try standard terminal emulators
+            // On Linux, try standard terminal emulators. A trailing '=' means
+            // the flag and path must be joined into a single arg (Ghostty
+            // parses its CLI flags like config keys and rejects the
+            // space-separated form).
             let terminals = [
-                ("gnome-terminal", &["--working-directory"]),
-                ("xfce4-terminal", &["--working-directory"]),
-                ("konsole", &["--workdir"]),
-                ("xterm", &["-working-directory"]),
+                ("gnome-terminal", "--working-directory"),
+                ("xfce4-terminal", "--working-directory"),
+                ("konsole", "--workdir"),
+                ("alacritty", "--working-directory"),
+                ("ghostty", "--working-directory="),
+                ("xterm", "-working-directory"),
             ];
-            
+
             let mut spawned = false;
-            for (term, args) in terminals.iter() {
+            for (term, flag) in terminals.iter() {
                 let mut cmd = std::process::Command::new(term);
-                cmd.arg(args[0]).arg(path);
+                if let Some(prefix) = flag.strip_suffix('=') {
+                    cmd.arg(format!("{}={}", prefix, path.to_string_lossy()));
+                } else {
+                    cmd.arg(*flag).arg(path);
+                }
                 if cmd.spawn().is_ok() {
                     spawned = true;
                     break;
