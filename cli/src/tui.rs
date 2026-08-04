@@ -10,6 +10,7 @@ use ratatui::{
 };
 use crossterm::event::{self, KeyCode, KeyModifiers};
 use anyhow::Result;
+use ratatui_image::{Resize, StatefulImage};
 
 use crate::config::{Config, PinnedItem, ViewMode};
 use crate::markdown::parse_markdown;
@@ -68,6 +69,8 @@ pub struct AppState {
     pub help_active: bool,
     pub gui_missing_active: bool,
     pub fullscreen: bool,
+    pub image_picker: ratatui_image::picker::Picker,
+    pub image_protocol: Option<ratatui_image::protocol::StatefulProtocol>,
 }
 
 
@@ -93,6 +96,11 @@ impl AppState {
         let palette = Palette::detect();
 
         let view_mode = config.view_mode;
+        // Queries the terminal for graphics-protocol support (Kitty/Sixel/iTerm2) and cell
+        // pixel size; falls back to a halfblocks approximation when the terminal doesn't
+        // answer (e.g. it isn't a real TTY, or doesn't support any image protocol).
+        let image_picker = ratatui_image::picker::Picker::from_query_stdio()
+            .unwrap_or_else(|_| ratatui_image::picker::Picker::halfblocks());
         let mut app = Self {
             config,
             current_dir,
@@ -123,6 +131,8 @@ impl AppState {
             help_active: false,
             gui_missing_active: false,
             fullscreen: false,
+            image_picker,
+            image_protocol: None,
         };
 
         app.reload_directory();
@@ -499,6 +509,14 @@ impl AppState {
 
         let path_str = path.to_string_lossy();
         if is_media_file(&path_str) {
+            self.image_protocol = if is_video_file(&path_str) {
+                None
+            } else {
+                image::ImageReader::open(&path)
+                    .ok()
+                    .and_then(|reader| reader.decode().ok())
+                    .map(|img| self.image_picker.new_resize_protocol(img))
+            };
             self.selected_file = Some(path);
             self.file_content = None;
             self.file_lines_count = 0;
@@ -506,6 +524,8 @@ impl AppState {
             self.error = None;
             return;
         }
+
+        self.image_protocol = None;
 
         match fs::read_to_string(&path) {
             Ok(content) => {
@@ -1479,7 +1499,7 @@ impl AppState {
     }
 
     pub fn draw(&mut self, f: &mut Frame<'_>) {
-        let rect = f.size();
+        let rect = f.area();
 
         let border_active_color = self.palette.border_active;
         let border_inactive_color = self.palette.border_inactive;
@@ -1804,31 +1824,40 @@ impl AppState {
             let viewer_block = viewer_block.title(format!("📄 Viewer: {} ({})", title, path_str));
 
             if is_media_file(&path_str) {
-                let media_type = if is_video_file(&title) { "Video" } else { "Image" };
-                let media_lines = vec![
-                    Line::from(""),
-                    Line::from(vec![
-                        Span::styled(format!("  🎞️ Media File: {}", title), Style::default().add_modifier(Modifier::BOLD).fg(self.palette.code))
-                    ]),
-                    Line::from(vec![
-                        Span::styled(format!("  Type: {}", media_type), Style::default().fg(text_secondary_color))
-                    ]),
-                    Line::from(vec![
-                        Span::styled(format!("  Location: {}", path_str), Style::default().fg(text_secondary_color))
-                    ]),
-                    Line::from(""),
-                    Line::from(vec![
-                        Span::styled("  Press ", Style::default().fg(text_secondary_color)),
-                        Span::styled("Enter", Style::default().add_modifier(Modifier::BOLD).fg(accent_color)),
-                        Span::styled(" or ", Style::default().fg(text_secondary_color)),
-                        Span::styled("o", Style::default().add_modifier(Modifier::BOLD).fg(accent_color)),
-                        Span::styled(" to open this media file in your system default GUI application.", Style::default().fg(text_secondary_color)),
-                    ]),
-                    Line::from(""),
-                ];
-                let paragraph = Paragraph::new(media_lines)
-                    .block(viewer_block);
-                f.render_widget(paragraph, content_area);
+                let is_video = is_video_file(&title);
+                if !is_video && self.image_protocol.is_some() {
+                    let inner = viewer_block.inner(content_area);
+                    f.render_widget(viewer_block, content_area);
+                    if let Some(protocol) = self.image_protocol.as_mut() {
+                        f.render_stateful_widget(StatefulImage::new().resize(Resize::Fit(None)), inner, protocol);
+                    }
+                } else {
+                    let media_type = if is_video { "Video" } else { "Image" };
+                    let media_lines = vec![
+                        Line::from(""),
+                        Line::from(vec![
+                            Span::styled(format!("  🎞️ Media File: {}", title), Style::default().add_modifier(Modifier::BOLD).fg(self.palette.code))
+                        ]),
+                        Line::from(vec![
+                            Span::styled(format!("  Type: {}", media_type), Style::default().fg(text_secondary_color))
+                        ]),
+                        Line::from(vec![
+                            Span::styled(format!("  Location: {}", path_str), Style::default().fg(text_secondary_color))
+                        ]),
+                        Line::from(""),
+                        Line::from(vec![
+                            Span::styled("  Press ", Style::default().fg(text_secondary_color)),
+                            Span::styled("Enter", Style::default().add_modifier(Modifier::BOLD).fg(accent_color)),
+                            Span::styled(" or ", Style::default().fg(text_secondary_color)),
+                            Span::styled("o", Style::default().add_modifier(Modifier::BOLD).fg(accent_color)),
+                            Span::styled(" to open this media file in your system default GUI application.", Style::default().fg(text_secondary_color)),
+                        ]),
+                        Line::from(""),
+                    ];
+                    let paragraph = Paragraph::new(media_lines)
+                        .block(viewer_block);
+                    f.render_widget(paragraph, content_area);
+                }
             } else if let Some(ref text) = self.file_content {
                 let paragraph = Paragraph::new(text.clone())
                     .block(viewer_block)
@@ -1940,7 +1969,7 @@ impl AppState {
     /// Render the currently selected file's content across the entire terminal
     /// with no sidebar, borders or status bar (see the `f` key in the viewer).
     fn draw_fullscreen(
-        &self,
+        &mut self,
         f: &mut Frame<'_>,
         area: ratatui::layout::Rect,
         text_primary_color: Color,
@@ -1963,7 +1992,15 @@ impl AppState {
             .unwrap_or_default();
 
         if is_media_file(&path_str) {
-            let media_type = if is_video_file(&title) { "Video" } else { "Image" };
+            let is_video = is_video_file(&title);
+            if !is_video {
+                if let Some(protocol) = self.image_protocol.as_mut() {
+                    let inner = block.inner(area);
+                    f.render_stateful_widget(StatefulImage::new().resize(Resize::Fit(None)), inner, protocol);
+                    return;
+                }
+            }
+            let media_type = if is_video { "Video" } else { "Image" };
             let media_lines = vec![
                 Line::from(""),
                 Line::from(vec![Span::styled(
