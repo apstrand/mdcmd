@@ -184,7 +184,13 @@ elif [ "$OS" = "Linux" ]; then
   LINUX_BUNDLE_DIR="src-tauri/target/release/bundle"
   
   if [ -d "$LINUX_BUNDLE_DIR" ]; then
-    find "$LINUX_BUNDLE_DIR" -type f \( -name "*.deb" -o -name "*.AppImage" \) -exec cp {} "$RELEASES_DIR/" \;
+    # .deb and .AppImage filenames keep spaces from productName
+    # ("MarkDown Commander"), which breaks unquoted use in shells/launchers.
+    # Rename to underscores (MarkDown_Commander) on copy instead of touching
+    # productName, which also drives the window title.
+    while IFS= read -r -d '' bundle; do
+      cp "$bundle" "$RELEASES_DIR/$(basename "$bundle" | sed 's/MarkDown Commander/MarkDown_Commander/')"
+    done < <(find "$LINUX_BUNDLE_DIR" -type f \( -name "*.deb" -o -name "*.AppImage" \) -print0)
   fi
 
 else

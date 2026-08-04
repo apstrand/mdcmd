@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "MarkDown Commander",
-  "version": "0.1.0",
+  "version": "../package.json",
   "identifier": "com.mdcmd",
   "build": {
     "beforeDevCommand": "node src-tauri/scripts/patch-ios-plist.mjs && npm run dev",
