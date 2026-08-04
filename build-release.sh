@@ -171,8 +171,13 @@ elif [ "$OS" = "Linux" ]; then
   fi
 
   # Run standard Linux build
+  #
+  # NO_STRIP=1 works around linuxdeploy bundling its own ancient `strip`
+  # (binutils 2.35), which can't parse the `.relr.dyn` (SHT_RELR) section
+  # emitted by libraries built with newer binutils/glibc (e.g. on Arch).
+  # See: linuxdeploy AppImage's usr/bin/strip vs system strip --version.
   echo "Building Linux binaries..."
-  npm run tauri build
+  NO_STRIP=1 npm run tauri build
 
   # Find and copy Linux bundles (.deb and .AppImage)
   echo "Organizing build assets into $RELEASES_DIR..."
