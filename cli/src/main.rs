@@ -73,6 +73,11 @@ fn main() -> Result<()> {
         std::env::current_dir().ok()
     };
 
+    // Detect the host terminal's background before switching to the
+    // alternate screen, so the OSC 11 query round-trips against the
+    // terminal's normal buffer.
+    let palette = palette::Palette::detect();
+
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
         let _ = disable_raw_mode();
@@ -83,11 +88,11 @@ fn main() -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, Hide)?;
-    
+
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = AppState::new(initial_path);
+    let mut app = AppState::new(initial_path, palette);
 
     while !app.quit {
         if app.needs_clear {

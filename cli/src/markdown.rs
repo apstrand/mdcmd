@@ -18,7 +18,7 @@ pub fn parse_markdown(content: &str, palette: &crate::palette::Palette) -> Text<
         if trimmed.starts_with("```") {
             in_code_block = !in_code_block;
             lines.push(Line::from(vec![
-                Span::styled(raw_line.to_string(), Style::default().fg(Color::Rgb(100, 116, 139)))
+                Span::styled(raw_line.to_string(), Style::default().fg(palette.text_muted))
             ]));
             continue;
         }
@@ -43,19 +43,19 @@ pub fn parse_markdown(content: &str, palette: &crate::palette::Palette) -> Text<
             continue;
         } else if trimmed.starts_with("## ") {
             lines.push(Line::from(vec![
-                Span::styled("## ", Style::default().fg(Color::Rgb(96, 165, 250)).add_modifier(Modifier::BOLD)),
+                Span::styled("## ", Style::default().fg(palette.heading2).add_modifier(Modifier::BOLD)),
                 Span::styled((&trimmed[3..]).to_string(), Style::default().fg(primary_text_color).add_modifier(Modifier::BOLD)),
             ]));
             continue;
         } else if trimmed.starts_with("### ") {
             lines.push(Line::from(vec![
-                Span::styled("### ", Style::default().fg(Color::Rgb(147, 197, 253)).add_modifier(Modifier::BOLD)),
+                Span::styled("### ", Style::default().fg(palette.heading3).add_modifier(Modifier::BOLD)),
                 Span::styled((&trimmed[4..]).to_string(), Style::default().fg(primary_text_color).add_modifier(Modifier::BOLD)),
             ]));
             continue;
         } else if trimmed.starts_with("#### ") {
             lines.push(Line::from(vec![
-                Span::styled("#### ", Style::default().fg(Color::Rgb(191, 219, 254)).add_modifier(Modifier::BOLD)),
+                Span::styled("#### ", Style::default().fg(palette.heading4).add_modifier(Modifier::BOLD)),
                 Span::styled((&trimmed[5..]).to_string(), Style::default().fg(primary_text_color).add_modifier(Modifier::BOLD)),
             ]));
             continue;
@@ -192,16 +192,21 @@ mod tests {
 
     fn get_mock_palette() -> crate::palette::Palette {
         crate::palette::Palette {
+            bg: Color::Black,
             border_active: Color::Blue,
             border_inactive: Color::Gray,
             text_primary: Color::White,
             text_secondary: Color::Gray,
+            text_muted: Color::Gray,
             text_dimmed: Color::DarkGray,
             accent: Color::Blue,
             accent_soft: Color::DarkGray,
             open_bg: Color::Black,
             code: Color::Yellow,
             code_bg: Color::Black,
+            heading2: Color::Blue,
+            heading3: Color::Blue,
+            heading4: Color::Blue,
         }
     }
 

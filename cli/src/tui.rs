@@ -129,7 +129,7 @@ pub struct AppState {
 
 
 impl AppState {
-    pub fn new(initial_path: Option<PathBuf>) -> Self {
+    pub fn new(initial_path: Option<PathBuf>, palette: Palette) -> Self {
         let config = Config::load();
         
         let start_path = initial_path
@@ -146,8 +146,6 @@ impl AppState {
         } else {
             start_path
         };
-
-        let palette = Palette::detect();
 
         let view_mode = config.view_mode;
         // Queries the terminal for graphics-protocol support (Kitty/Sixel/iTerm2) and cell
@@ -1637,6 +1635,14 @@ impl AppState {
         }
 
         let rect = f.area();
+
+        // Paint an explicit background for the whole frame so the app looks
+        // consistent regardless of the host terminal's own theme, instead of
+        // relying on the terminal's default background showing through.
+        f.render_widget(
+            Block::default().style(Style::default().bg(self.palette.bg)),
+            rect,
+        );
 
         let border_active_color = self.palette.border_active;
         let border_inactive_color = self.palette.border_inactive;
