@@ -22,3 +22,6 @@ dirs = "5.0"
 anyhow = "1.0"
 ratatui-image = { version = "11.0.6", default-features = false, features = ["crossterm", "image-defaults"] }
 image = "0.25"
+tui-term = "0.3.4"
+portable-pty = "0.9.0"
+vt100 = "0.16.2"

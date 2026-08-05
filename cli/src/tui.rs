@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, RwLock};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -11,6 +13,8 @@ use ratatui::{
 use crossterm::event::{self, KeyCode, KeyModifiers};
 use anyhow::Result;
 use ratatui_image::{Resize, StatefulImage};
+use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
+use tui_term::widget::PseudoTerminal;
 
 use crate::config::{Config, PinnedItem, ViewMode};
 use crate::markdown::parse_markdown;
@@ -37,6 +41,33 @@ pub struct TuiTreeNode {
     pub is_dir: bool,
     pub depth: usize,
     pub parent_path: Option<PathBuf>,
+}
+
+/// A text editor running in a real PTY, embedded inline in the viewer pane
+/// instead of taking over the whole screen. `master` is kept around (rather
+/// than only cloning a reader/writer from it) purely so we can call
+/// `resize()` on it whenever the viewer pane's area changes.
+pub struct PtySession {
+    master: Box<dyn portable_pty::MasterPty + Send>,
+    writer: Box<dyn Write + Send>,
+    parser: Arc<RwLock<vt100::Parser>>,
+    exited: Arc<AtomicBool>,
+    cols: u16,
+    rows: u16,
+}
+
+impl PtySession {
+    fn resize(&mut self, cols: u16, rows: u16) {
+        if cols == self.cols && rows == self.rows || cols == 0 || rows == 0 {
+            return;
+        }
+        self.cols = cols;
+        self.rows = rows;
+        let _ = self.master.resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 });
+        if let Ok(mut parser) = self.parser.write() {
+            parser.screen_mut().set_size(rows, cols);
+        }
+    }
 }
 
 pub struct AppState {
@@ -71,6 +102,8 @@ pub struct AppState {
     pub fullscreen: bool,
     pub image_picker: ratatui_image::picker::Picker,
     pub image_protocol: Option<ratatui_image::protocol::StatefulProtocol>,
+    pub pty_session: Option<PtySession>,
+    pub last_content_area: Rect,
 }
 
 
@@ -133,6 +166,8 @@ impl AppState {
             fullscreen: false,
             image_picker,
             image_protocol: None,
+            pty_session: None,
+            last_content_area: Rect::new(0, 0, 80, 24),
         };
 
         app.reload_directory();
@@ -646,6 +681,14 @@ impl AppState {
 
     pub fn handle_key(&mut self, key: event::KeyEvent) -> Result<()> {
         self.status_message = None;
+
+        // While an inline editor session is running, every key goes straight
+        // to it (mirroring tmux/embedded-terminal conventions) rather than
+        // being interpreted as an mdc keybinding. The session tears itself
+        // down automatically once the child process exits.
+        if self.pty_session.is_some() {
+            return self.handle_pty_key(key);
+        }
 
         if self.create_active {
             self.handle_key_create_input(key)?;
@@ -1448,57 +1491,124 @@ impl AppState {
         Ok(())
     }
 
+    /// Spawn `$EDITOR` (falling back to vim, then nano) attached to a real
+    /// PTY and embed it inline in the viewer pane, instead of leaving the
+    /// alternate screen and blocking on a foreground child process. The
+    /// session is torn down automatically once the child process exits (see
+    /// the `pty_session` exited-check at the top of `draw`).
     fn edit_current_file(&mut self) -> Result<()> {
         let file_path = match &self.selected_file {
             Some(p) => p.clone(),
             None => return Ok(()),
         };
-
-        crossterm::terminal::disable_raw_mode()?;
-        std::io::stdout().flush()?;
-        crossterm::execute!(
-            std::io::stdout(),
-            crossterm::terminal::LeaveAlternateScreen,
-            crossterm::cursor::Show
-        )?;
-
-        let editor = std::env::var("EDITOR").unwrap_or_else(|_| "nano".to_string());
-        
-        let child = std::process::Command::new(&editor)
-            .arg(&file_path)
-            .spawn();
-
-        match child {
-            Ok(mut c) => {
-                let _ = c.wait();
-            }
-            Err(_) => {
-                let fallback = std::process::Command::new("vim")
-                    .arg(&file_path)
-                    .spawn();
-                if fallback.is_err() {
-                    let _ = std::process::Command::new("nano")
-                        .arg(&file_path)
-                        .spawn()
-                        .map(|mut c| c.wait());
-                }
-            }
+        if self.pty_session.is_some() {
+            return Ok(());
         }
 
-        crossterm::terminal::enable_raw_mode()?;
-        crossterm::execute!(
-            std::io::stdout(),
-            crossterm::terminal::EnterAlternateScreen,
-            crossterm::cursor::Hide
-        )?;
+        let area = self.last_content_area;
+        let cols = area.width.saturating_sub(2).max(10);
+        let rows = area.height.saturating_sub(2).max(3);
 
-        self.select_file(file_path);
+        let pty_system = NativePtySystem::default();
+        let pair = pty_system.openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })?;
+
+        let editor = std::env::var("EDITOR").unwrap_or_else(|_| "nano".to_string());
+        let cwd = file_path.parent().map(|p| p.to_path_buf());
+        let build_cmd = |program: &str| {
+            let mut cmd = CommandBuilder::new(program);
+            cmd.arg(&file_path);
+            if let Some(dir) = &cwd {
+                cmd.cwd(dir);
+            }
+            cmd
+        };
+
+        let child = pair
+            .slave
+            .spawn_command(build_cmd(&editor))
+            .or_else(|_| pair.slave.spawn_command(build_cmd("vim")))
+            .or_else(|_| pair.slave.spawn_command(build_cmd("nano")));
+        let mut child = match child {
+            Ok(c) => c,
+            Err(e) => {
+                self.error = Some(format!("Failed to launch editor: {}", e));
+                return Ok(());
+            }
+        };
+        drop(pair.slave);
+
+        let exited = Arc::new(AtomicBool::new(false));
+        {
+            let exited = exited.clone();
+            std::thread::spawn(move || {
+                let _ = child.wait();
+                exited.store(true, Ordering::SeqCst);
+            });
+        }
+
+        let parser = Arc::new(RwLock::new(vt100::Parser::new(rows, cols, 0)));
+        let mut reader = pair.master.try_clone_reader()?;
+        {
+            let parser = parser.clone();
+            std::thread::spawn(move || {
+                let mut buf = [0u8; 8192];
+                loop {
+                    match reader.read(&mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => {
+                            if let Ok(mut p) = parser.write() {
+                                p.process(&buf[..n]);
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        let writer = pair.master.take_writer()?;
+
+        self.pty_session = Some(PtySession {
+            master: pair.master,
+            writer,
+            parser,
+            exited,
+            cols,
+            rows,
+        });
+        self.fullscreen = false;
         self.needs_clear = true;
-        
+
+        Ok(())
+    }
+
+    /// Forward a key event to the active PTY editor session as raw bytes.
+    fn handle_pty_key(&mut self, key: event::KeyEvent) -> Result<()> {
+        if key.kind != event::KeyEventKind::Press {
+            return Ok(());
+        }
+        let bytes = pty_input_bytes(key);
+        if bytes.is_empty() {
+            return Ok(());
+        }
+        if let Some(session) = self.pty_session.as_mut() {
+            let _ = session.writer.write_all(&bytes);
+            let _ = session.writer.flush();
+        }
         Ok(())
     }
 
     pub fn draw(&mut self, f: &mut Frame<'_>) {
+        // The PTY's exit is only observed asynchronously by a background
+        // thread; poll for it once per frame so we reliably fall back to the
+        // normal viewer shortly after the editor process exits.
+        if matches!(&self.pty_session, Some(session) if session.exited.load(Ordering::SeqCst)) {
+            self.pty_session = None;
+            if let Some(path) = self.selected_file.clone() {
+                self.select_file(path);
+            }
+            self.needs_clear = true;
+        }
+
         let rect = f.area();
 
         let border_active_color = self.palette.border_active;
@@ -1817,7 +1927,27 @@ impl AppState {
             .borders(Borders::ALL)
             .border_style(Style::default().fg(viewer_border_color));
 
-        if let Some(ref file_path) = self.selected_file {
+        self.last_content_area = content_area;
+        if let Some(session) = self.pty_session.as_mut() {
+            session.resize(
+                content_area.width.saturating_sub(2),
+                content_area.height.saturating_sub(2),
+            );
+        }
+
+        if let Some(session) = self.pty_session.as_ref() {
+            let title = self
+                .selected_file
+                .as_ref()
+                .and_then(|p| p.file_name())
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let editing_block = viewer_block.title(format!("✏️  Editing: {} (quit the editor to return)", title));
+            if let Ok(parser) = session.parser.read() {
+                let pseudo_term = PseudoTerminal::new(parser.screen()).block(editing_block);
+                f.render_widget(pseudo_term, content_area);
+            }
+        } else if let Some(ref file_path) = self.selected_file {
             let path_str = file_path.to_string_lossy();
             let title = file_path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             
@@ -2235,6 +2365,73 @@ impl AppState {
                 Span::styled("Quit application", Style::default().fg(text_primary_color))
             ]),
         ]
+    }
+}
+
+/// Encode a crossterm key event as the raw bytes a real terminal would send
+/// for it, so it can be written straight into a PTY's input. Covers the
+/// keys interactive editors (vim, nano, ...) actually rely on: control
+/// chars (via Ctrl+letter), Alt as an Esc prefix, and standard xterm CSI/SS3
+/// sequences for cursor/function keys.
+fn pty_input_bytes(key: event::KeyEvent) -> Vec<u8> {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let alt = key.modifiers.contains(KeyModifiers::ALT);
+
+    let mut bytes: Vec<u8> = match key.code {
+        KeyCode::Char(c) if ctrl => match c.to_ascii_lowercase() {
+            lower @ 'a'..='z' => vec![(lower as u8) - b'a' + 1],
+            _ => match c {
+                '[' => vec![0x1b],
+                '\\' => vec![0x1c],
+                ']' => vec![0x1d],
+                '^' => vec![0x1e],
+                '_' | '?' => vec![0x1f],
+                '@' | ' ' => vec![0x00],
+                _ => c.to_string().into_bytes(),
+            },
+        },
+        KeyCode::Char(c) => c.to_string().into_bytes(),
+        KeyCode::Enter => vec![b'\r'],
+        KeyCode::Backspace => vec![0x7f],
+        KeyCode::Tab => vec![0x09],
+        KeyCode::BackTab => b"\x1b[Z".to_vec(),
+        KeyCode::Esc => vec![0x1b],
+        KeyCode::Left => b"\x1b[D".to_vec(),
+        KeyCode::Right => b"\x1b[C".to_vec(),
+        KeyCode::Up => b"\x1b[A".to_vec(),
+        KeyCode::Down => b"\x1b[B".to_vec(),
+        KeyCode::Home => b"\x1b[H".to_vec(),
+        KeyCode::End => b"\x1b[F".to_vec(),
+        KeyCode::PageUp => b"\x1b[5~".to_vec(),
+        KeyCode::PageDown => b"\x1b[6~".to_vec(),
+        KeyCode::Delete => b"\x1b[3~".to_vec(),
+        KeyCode::Insert => b"\x1b[2~".to_vec(),
+        KeyCode::F(n) => f_key_bytes(n),
+        _ => Vec::new(),
+    };
+
+    if alt && !bytes.is_empty() {
+        bytes.insert(0, 0x1b);
+    }
+
+    bytes
+}
+
+fn f_key_bytes(n: u8) -> Vec<u8> {
+    match n {
+        1 => b"\x1bOP".to_vec(),
+        2 => b"\x1bOQ".to_vec(),
+        3 => b"\x1bOR".to_vec(),
+        4 => b"\x1bOS".to_vec(),
+        5 => b"\x1b[15~".to_vec(),
+        6 => b"\x1b[17~".to_vec(),
+        7 => b"\x1b[18~".to_vec(),
+        8 => b"\x1b[19~".to_vec(),
+        9 => b"\x1b[20~".to_vec(),
+        10 => b"\x1b[21~".to_vec(),
+        11 => b"\x1b[23~".to_vec(),
+        12 => b"\x1b[24~".to_vec(),
+        _ => Vec::new(),
     }
 }
 

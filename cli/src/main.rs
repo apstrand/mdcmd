@@ -96,7 +96,11 @@ fn main() -> Result<()> {
         }
         terminal.draw(|f| app.draw(f))?;
 
-        if event::poll(Duration::from_millis(100))? {
+        // An inline editor session needs to redraw promptly as the child
+        // process produces output; the plain viewer doesn't change between
+        // keystrokes, so a slower poll is fine there.
+        let poll_interval = if app.pty_session.is_some() { 16 } else { 100 };
+        if event::poll(Duration::from_millis(poll_interval))? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == event::KeyEventKind::Press {
                     app.handle_key(key)?;
