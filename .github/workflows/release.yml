@@ -18,7 +18,7 @@ jobs:
         include:
           - platform: 'macos-latest'
             args: '--target universal-apple-darwin'
-          - platform: 'ubuntu-22.04'
+          - platform: 'ubuntu-24.04'
             args: ''
 
     runs-on: ${{ matrix.platform }}
@@ -38,7 +38,7 @@ jobs:
           targets: ${{ matrix.platform == 'macos-latest' && 'x86_64-apple-darwin,aarch64-apple-darwin' || '' }}
 
       - name: Install system dependencies (Linux only)
-        if: matrix.platform == 'ubuntu-22.04'
+        if: matrix.platform == 'ubuntu-24.04'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -66,7 +66,7 @@ jobs:
       # helpers into the plain (non-multiarch) path here makes the bundler's
       # own search loop also copy them to the flattened location it needs.
       - name: Work around AppImage webkit2gtk multiarch path bug (Linux only)
-        if: matrix.platform == 'ubuntu-22.04'
+        if: matrix.platform == 'ubuntu-24.04'
         run: |
           src=/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1
           dest=/usr/lib/webkit2gtk-4.1
