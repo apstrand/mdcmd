@@ -27,6 +27,27 @@ pub enum ActiveSection {
     Viewer,
 }
 
+/// Reading modes cycled through with `f` in the viewer.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum FullscreenMode {
+    #[default]
+    Off,
+    /// No sidebar/status bar; text centered in a comfortable reading column.
+    Margins,
+    /// No sidebar/status bar; no margins, wraps only at the terminal edge.
+    NoMargins,
+}
+
+impl FullscreenMode {
+    fn next(self) -> Self {
+        match self {
+            FullscreenMode::Off => FullscreenMode::Margins,
+            FullscreenMode::Margins => FullscreenMode::NoMargins,
+            FullscreenMode::NoMargins => FullscreenMode::Off,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct FileEntry {
     pub name: String,
@@ -99,7 +120,7 @@ pub struct AppState {
     pub cached_search_results: Option<Vec<FileEntry>>,
     pub help_active: bool,
     pub gui_missing_active: bool,
-    pub fullscreen: bool,
+    pub fullscreen: FullscreenMode,
     pub image_picker: ratatui_image::picker::Picker,
     pub image_protocol: Option<ratatui_image::protocol::StatefulProtocol>,
     pub pty_session: Option<PtySession>,
@@ -163,7 +184,7 @@ impl AppState {
             cached_search_results: None,
             help_active: false,
             gui_missing_active: false,
-            fullscreen: false,
+            fullscreen: FullscreenMode::Off,
             image_picker,
             image_protocol: None,
             pty_session: None,
@@ -1088,7 +1109,7 @@ impl AppState {
                             let path = PathBuf::from(&entry.path);
                             self.select_file(path);
                             self.active_section = ActiveSection::Viewer;
-                            self.fullscreen = true;
+                            self.fullscreen = FullscreenMode::Margins;
                             self.needs_clear = true;
                         }
                     }
@@ -1416,7 +1437,7 @@ impl AppState {
                 if let Some(path) = node_opt {
                     self.select_file(path);
                     self.active_section = ActiveSection::Viewer;
-                    self.fullscreen = true;
+                    self.fullscreen = FullscreenMode::Margins;
                     self.needs_clear = true;
                 }
             }
@@ -1427,19 +1448,25 @@ impl AppState {
 
 
     fn handle_key_viewer(&mut self, key: event::KeyEvent) -> Result<()> {
-        // Fullscreen reading mode: 'f' toggles it, Esc leaves it. Handle these
-        // before the global keys so Esc doesn't quit the app while fullscreen.
-        if self.fullscreen {
+        // 'f' cycles Normal -> Margins -> NoMargins -> Normal; Esc always
+        // returns straight to Normal. Handle these before the global keys so
+        // Esc doesn't quit the app while in a fullscreen reading mode.
+        if self.fullscreen != FullscreenMode::Off {
             match key.code {
-                KeyCode::Char('f') | KeyCode::Esc => {
-                    self.fullscreen = false;
+                KeyCode::Char('f') => {
+                    self.fullscreen = self.fullscreen.next();
+                    self.needs_clear = true;
+                    return Ok(());
+                }
+                KeyCode::Esc => {
+                    self.fullscreen = FullscreenMode::Off;
                     self.needs_clear = true;
                     return Ok(());
                 }
                 _ => {}
             }
         } else if key.code == KeyCode::Char('f') && self.selected_file.is_some() {
-            self.fullscreen = true;
+            self.fullscreen = FullscreenMode::Margins;
             self.needs_clear = true;
             return Ok(());
         }
@@ -1575,7 +1602,7 @@ impl AppState {
             cols,
             rows,
         });
-        self.fullscreen = false;
+        self.fullscreen = FullscreenMode::Off;
         self.needs_clear = true;
 
         Ok(())
@@ -1618,9 +1645,9 @@ impl AppState {
         let accent_color = self.palette.accent;
         let accent_soft_color = self.palette.accent_soft;
 
-        // Fullscreen reading mode: no sidebar, no borders, no status bar — just
-        // the file content filling the whole terminal (with a small margin).
-        if self.fullscreen {
+        // Fullscreen reading modes: no sidebar, no borders, no status bar — just
+        // the file content filling the whole terminal.
+        if self.fullscreen != FullscreenMode::Off {
             self.draw_fullscreen(f, rect, text_primary_color, text_secondary_color, accent_color);
             return;
         }
@@ -2106,8 +2133,19 @@ impl AppState {
         text_secondary_color: Color,
         accent_color: Color,
     ) {
-        // A little breathing room so text isn't glued to the terminal edges.
-        let block = Block::default().padding(Padding::new(2, 2, 1, 0));
+        // Margins mode: cap the content to a comfortable reading width and
+        // center it in the terminal, with a small padding for breathing room.
+        // NoMargins mode: use the full terminal, no padding — text wraps only
+        // where the terminal itself forces a line break.
+        const READING_WIDTH: u16 = 100;
+        let (area, block) = if self.fullscreen == FullscreenMode::Margins {
+            let content_width = area.width.min(READING_WIDTH);
+            let margin_x = area.width.saturating_sub(content_width) / 2;
+            let centered = Rect::new(area.x + margin_x, area.y, content_width, area.height);
+            (centered, Block::default().padding(Padding::new(2, 2, 1, 0)))
+        } else {
+            (area, Block::default().padding(Padding::new(0, 0, 0, 0)))
+        };
 
         let path_str = self
             .selected_file
@@ -2149,7 +2187,7 @@ impl AppState {
                 Line::from(vec![
                     Span::styled("Press ", Style::default().fg(text_secondary_color)),
                     Span::styled("f", Style::default().add_modifier(Modifier::BOLD).fg(accent_color)),
-                    Span::styled(" or ", Style::default().fg(text_secondary_color)),
+                    Span::styled(" to cycle reading modes, ", Style::default().fg(text_secondary_color)),
                     Span::styled("Esc", Style::default().add_modifier(Modifier::BOLD).fg(accent_color)),
                     Span::styled(" to exit fullscreen.", Style::default().fg(text_secondary_color)),
                 ]),
@@ -2358,7 +2396,7 @@ impl AppState {
             ]),
             Line::from(vec![
                 Span::styled("    f               : ", Style::default().fg(text_secondary_color)),
-                Span::styled("Toggle fullscreen reading mode (Viewer; f/Esc to exit)", Style::default().fg(text_primary_color))
+                Span::styled("Cycle fullscreen reading modes: normal/margins/no margins (Viewer; Esc to exit)", Style::default().fg(text_primary_color))
             ]),
             Line::from(vec![
                 Span::styled("    Ctrl-q          : ", Style::default().fg(text_secondary_color)),
