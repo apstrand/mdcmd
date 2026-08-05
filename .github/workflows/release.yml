@@ -54,6 +54,27 @@ jobs:
             libdbus-1-dev \
             pkg-config
 
+      # tauri-bundler mirrors WebKitWebProcess/WebKitNetworkProcess into the
+      # AppImage at whatever path they're found on the build machine (see
+      # crates/tauri-bundler/src/bundle/linux/appimage/linuxdeploy.rs), while
+      # libwebkit2gtk-4.1.so.0 itself always gets flattened into usr/lib/.
+      # On Ubuntu's multiarch layout those helpers live under
+      # /usr/lib/x86_64-linux-gnu/webkit2gtk-4.1, so they land at a path in
+      # the AppImage that doesn't match where the .so ends up, and
+      # WebKitGTK's runtime process lookup fails silently: the app window
+      # shows its native menu but the webview stays black. Mirroring the
+      # helpers into the plain (non-multiarch) path here makes the bundler's
+      # own search loop also copy them to the flattened location it needs.
+      - name: Work around AppImage webkit2gtk multiarch path bug (Linux only)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          src=/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1
+          dest=/usr/lib/webkit2gtk-4.1
+          sudo mkdir -p "$dest/injected-bundle"
+          sudo cp -n "$src/WebKitNetworkProcess" "$dest/"
+          sudo cp -n "$src/WebKitWebProcess" "$dest/"
+          sudo cp -n "$src/injected-bundle/libwebkit2gtkinjectedbundle.so" "$dest/injected-bundle/"
+
       - name: Install frontend dependencies
         run: npm ci
 
