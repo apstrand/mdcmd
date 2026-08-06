@@ -108,3 +108,36 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
+
+  flatpak:
+    name: Build Flatpak
+    needs: release
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-50
+      options: --privileged
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # The manifest's git source is pinned to a specific tag/commit so it
+      # always builds something known-working when run locally. For a
+      # release build we want it to build the exact tag/commit being
+      # released instead, so overwrite the pin here.
+      - name: Pin the Flatpak manifest to this release
+        run: |
+          sed -i "s/tag: .*/tag: ${{ github.ref_name }}/" flatpak/com.mdcmd.App.yml
+          sed -i "s/commit: .*/commit: ${{ github.sha }}/" flatpak/com.mdcmd.App.yml
+
+      - name: Build Flatpak
+        uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: MarkDown.Commander_${{ github.ref_name }}_x86_64.flatpak
+          manifest-path: flatpak/com.mdcmd.App.yml
+          cache-key: flatpak-builder-${{ github.sha }}
+
+      - name: Upload Flatpak bundle to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: MarkDown.Commander_${{ github.ref_name }}_x86_64.flatpak
