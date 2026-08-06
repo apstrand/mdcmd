@@ -91,6 +91,17 @@ impl PtySession {
     }
 }
 
+/// A decoded image referenced by `![alt](src)` in the markdown source,
+/// positioned inline in the rendered `Text`. `line` indexes into
+/// `AppState::file_content`, at a one-line placeholder that has been padded
+/// out to `rows` blank lines to reserve vertical space for the image.
+pub struct InlineImage {
+    line: usize,
+    rows: u16,
+    cols: u16,
+    protocol: Option<ratatui_image::protocol::StatefulProtocol>,
+}
+
 pub struct AppState {
     pub config: Config,
     pub current_dir: PathBuf,
@@ -101,6 +112,8 @@ pub struct AppState {
     pub selected_file: Option<PathBuf>,
     pub file_content: Option<Text<'static>>,
     pub file_lines_count: usize,
+    pub line_map: Vec<usize>,
+    pub image_blocks: Vec<InlineImage>,
     pub scroll_offset: usize,
     pub error: Option<String>,
     pub quit: bool,
@@ -163,6 +176,8 @@ impl AppState {
             selected_file: None,
             file_content: None,
             file_lines_count: 0,
+            line_map: Vec::new(),
+            image_blocks: Vec::new(),
             scroll_offset: 0,
             error: None,
             quit: false,
@@ -574,6 +589,8 @@ impl AppState {
             self.selected_file = Some(path);
             self.file_content = None;
             self.file_lines_count = 0;
+            self.line_map = Vec::new();
+            self.image_blocks = Vec::new();
             self.scroll_offset = 0;
             self.error = None;
             return;
@@ -584,8 +601,11 @@ impl AppState {
         match fs::read_to_string(&path) {
             Ok(content) => {
                 let parsed = parse_markdown(&content, &self.palette);
-                self.file_lines_count = parsed.lines.len();
-                self.file_content = Some(parsed);
+                let (text, line_map, image_blocks) = self.load_inline_images(&path, parsed);
+                self.file_lines_count = text.lines.len();
+                self.file_content = Some(text);
+                self.line_map = line_map;
+                self.image_blocks = image_blocks;
                 self.selected_file = Some(path);
                 self.scroll_offset = 0;
                 self.error = None;
@@ -594,10 +614,75 @@ impl AppState {
                 self.selected_file = Some(path);
                 self.file_content = None;
                 self.file_lines_count = 0;
+                self.line_map = Vec::new();
+                self.image_blocks = Vec::new();
                 self.scroll_offset = 0;
                 self.error = Some(format!("Error opening file: {}", e));
             }
         }
+    }
+
+    /// Decodes each `![alt](src)` reference found by `parse_markdown`,
+    /// resolves it relative to the markdown file's directory, and splices
+    /// extra blank lines into the rendered `Text` to reserve enough rows to
+    /// show it at a sensible aspect ratio. Remote (`http(s)://`) sources and
+    /// anything that fails to decode are left as their placeholder line.
+    fn load_inline_images(
+        &self,
+        file_path: &Path,
+        parsed: crate::markdown::ParsedMarkdown,
+    ) -> (Text<'static>, Vec<usize>, Vec<InlineImage>) {
+        let crate::markdown::ParsedMarkdown { mut text, images, mut line_map } = parsed;
+        if images.is_empty() {
+            return (text, line_map, Vec::new());
+        }
+
+        let base_dir = file_path.parent().map(Path::to_path_buf);
+        let avail_cols = self.last_content_area.width.saturating_sub(4).clamp(20, 70);
+        let font = self.image_picker.font_size();
+
+        let mut image_blocks = Vec::new();
+        let mut offset = 0usize;
+        for img_ref in images {
+            let line = img_ref.line + offset;
+            let is_remote = img_ref.src.starts_with("http://") || img_ref.src.starts_with("https://");
+            let resolved = if is_remote {
+                None
+            } else {
+                let p = PathBuf::from(&img_ref.src);
+                Some(if p.is_absolute() {
+                    p
+                } else {
+                    base_dir.clone().unwrap_or_else(|| PathBuf::from(".")).join(p)
+                })
+            };
+
+            let decoded = resolved
+                .as_ref()
+                .and_then(|p| image::ImageReader::open(p).ok())
+                .and_then(|r| r.decode().ok());
+
+            if let Some(img) = decoded {
+                let (iw, ih) = (img.width().max(1), img.height().max(1));
+                let px_w = avail_cols as u32 * font.width.max(1) as u32;
+                let px_h = px_w * ih / iw;
+                let rows = px_h.div_ceil(font.height.max(1) as u32).clamp(4, 30) as u16;
+
+                if rows > 1 {
+                    let blank_count = (rows - 1) as usize;
+                    for i in 0..blank_count {
+                        text.lines.insert(line + 1 + i, Line::from(""));
+                        line_map.insert(line + 1 + i, line_map[line]);
+                    }
+                    offset += blank_count;
+                }
+
+                let protocol = self.image_picker.new_resize_protocol(img);
+                image_blocks.push(InlineImage { line, rows, cols: avail_cols, protocol: Some(protocol) });
+            }
+        }
+
+        (text, line_map, image_blocks)
     }
 
     pub fn close_file(&mut self, path: PathBuf) {
@@ -614,6 +699,8 @@ impl AppState {
                     self.selected_file = None;
                     self.file_content = None;
                     self.file_lines_count = 0;
+                    self.line_map = Vec::new();
+                    self.image_blocks = Vec::new();
                     self.scroll_offset = 0;
                     self.error = None;
                 }
@@ -2021,12 +2108,15 @@ impl AppState {
                         .block(viewer_block);
                     f.render_widget(paragraph, content_area);
                 }
-            } else if let Some(ref text) = self.file_content {
+            } else if self.file_content.is_some() {
+                let inner = viewer_block.inner(content_area);
+                let text = self.file_content.clone().unwrap();
                 let paragraph = Paragraph::new(text.clone())
                     .block(viewer_block)
                     .scroll((self.scroll_offset as u16, 0))
                     .wrap(Wrap { trim: false });
                 f.render_widget(paragraph, content_area);
+                self.render_inline_images(f, &text, inner);
             } else {
                 let paragraph = Paragraph::new(vec![Line::from("  No content loaded.")])
                     .block(viewer_block);
@@ -2129,6 +2219,30 @@ impl AppState {
         }
     }
 
+    /// Overlays any inline images from `image_blocks` that are fully within
+    /// `inner`'s visible rows for the current scroll position. Partially
+    /// scrolled images are skipped rather than drawn squished, since the
+    /// terminal graphics protocols resize-to-fit the given area rather than
+    /// cropping — they'll pop back in once fully scrolled into view.
+    fn render_inline_images(&mut self, f: &mut Frame<'_>, text: &Text<'static>, inner: Rect) {
+        if self.image_blocks.is_empty() || inner.width == 0 || inner.height == 0 {
+            return;
+        }
+        let wrap_width = inner.width;
+        let scroll = self.scroll_offset as u16;
+        for img in self.image_blocks.iter_mut() {
+            let Some(protocol) = img.protocol.as_mut() else { continue };
+            let top = wrapped_row_offset(text, img.line, wrap_width) as i32 - scroll as i32;
+            let bottom = top + img.rows as i32;
+            if top < 0 || bottom > inner.height as i32 {
+                continue;
+            }
+            let width = img.cols.min(inner.width).max(1);
+            let rect = Rect::new(inner.x, inner.y + top as u16, width, img.rows);
+            f.render_stateful_widget(StatefulImage::new().resize(Resize::Fit(None)), rect, protocol);
+        }
+    }
+
     /// Render the currently selected file's content across the entire terminal
     /// with no sidebar, borders or status bar (see the `f` key in the viewer).
     fn draw_fullscreen(
@@ -2199,12 +2313,15 @@ impl AppState {
                 ]),
             ];
             f.render_widget(Paragraph::new(media_lines).block(block), area);
-        } else if let Some(ref text) = self.file_content {
+        } else if self.file_content.is_some() {
+            let inner = block.inner(area);
+            let text = self.file_content.clone().unwrap();
             let paragraph = Paragraph::new(text.clone())
                 .block(block)
                 .scroll((self.scroll_offset as u16, 0))
                 .wrap(Wrap { trim: false });
             f.render_widget(paragraph, area);
+            self.render_inline_images(f, &text, inner);
         } else {
             let paragraph = Paragraph::new(vec![Line::from(Span::styled(
                 "No content loaded.",
@@ -2477,6 +2594,20 @@ fn f_key_bytes(n: u8) -> Vec<u8> {
         12 => b"\x1b[24~".to_vec(),
         _ => Vec::new(),
     }
+}
+
+/// The visual row (after word-wrap, before scrolling) at which rendered
+/// line `upto_line` begins — i.e. the total wrapped-row count of every line
+/// before it. Delegates to `Paragraph::line_count`, which uses the exact
+/// same word-wrapper the viewer renders with, so this stays in sync with it
+/// automatically instead of re-implementing wrapping by hand.
+fn wrapped_row_offset(text: &Text<'static>, upto_line: usize, width: u16) -> u16 {
+    if upto_line == 0 || width == 0 {
+        return 0;
+    }
+    let upto_line = upto_line.min(text.lines.len());
+    let prefix = Text::from(text.lines[..upto_line].to_vec());
+    Paragraph::new(prefix).wrap(Wrap { trim: false }).line_count(width) as u16
 }
 
 pub fn is_media_file(path: &str) -> bool {
