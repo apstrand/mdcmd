@@ -38,7 +38,7 @@ modules:
     sources:
       - type: git
         url: https://github.com/apstrand/mdcmd.git
-        tag: v0.1.6
+        tag: v0.1.7
         commit: fe7bf4b44989fa2d58634f6b930e77cebc04e1bb
       - type: file
         path: com.mdcmd.App.desktop
