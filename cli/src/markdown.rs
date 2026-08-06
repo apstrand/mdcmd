@@ -170,7 +170,11 @@ fn parse_image_line(trimmed: &str) -> Option<InlineImageSyntax> {
     let alt = trimmed[2..close_bracket].to_string();
     let rest = &trimmed[close_bracket + 2..];
     let close_paren = rest.find(')')?;
-    if !rest[close_paren + 1..].trim().is_empty() {
+    // Tolerate a trailing Pandoc/Quarto attribute block, e.g.
+    // `![alt](src){fig-alt="..." width="50%"}` — we don't parse the
+    // attributes, just don't let their presence disqualify the image.
+    let trailing = rest[close_paren + 1..].trim();
+    if !trailing.is_empty() && !(trailing.starts_with('{') && trailing.ends_with('}')) {
         return None;
     }
     let inner = rest[..close_paren].trim();
@@ -335,6 +339,16 @@ mod tests {
         assert_eq!(parsed.images.len(), 1);
         assert_eq!(parsed.images[0].alt, "");
         assert_eq!(parsed.images[0].src, "pic.jpg");
+    }
+
+    #[test]
+    fn test_image_with_quarto_attribute_block() {
+        let content = r#"![First assembly.](images/IMG_0051.jpeg){fig-alt="First assembly."}"#;
+        let palette = get_mock_palette();
+        let parsed = parse_markdown(content, &palette);
+        assert_eq!(parsed.images.len(), 1);
+        assert_eq!(parsed.images[0].alt, "First assembly.");
+        assert_eq!(parsed.images[0].src, "images/IMG_0051.jpeg");
     }
 
     #[test]
