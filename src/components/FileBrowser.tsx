@@ -88,10 +88,10 @@ export default function FileBrowser({
   const [focusedWorkspaceIndex, setFocusedWorkspaceIndex] = useState<number>(0);
   const [focusedEntryIndex, setFocusedEntryIndex] = useState<number>(0);
 
-  // Persistent workspace pane height percentage (default 25%)
-  const [workspaceHeightPercent, setWorkspaceHeightPercent] = useState<number>(() => {
+  // Persistent top-pane (folders) height percentage (default 25%)
+  const [topSectionHeightPercent, setTopSectionHeightPercent] = useState<number>(() => {
     try {
-      const saved = localStorage.getItem("tauri-markdown-workspace-ratio");
+      const saved = localStorage.getItem("tauri-markdown-top-section-ratio");
       return saved ? parseFloat(saved) : 25;
     } catch {
       return 25;
@@ -99,8 +99,8 @@ export default function FileBrowser({
   });
 
   useEffect(() => {
-    localStorage.setItem("tauri-markdown-workspace-ratio", String(workspaceHeightPercent));
-  }, [workspaceHeightPercent]);
+    localStorage.setItem("tauri-markdown-top-section-ratio", String(topSectionHeightPercent));
+  }, [topSectionHeightPercent]);
 
   // Fetch build/version info once (native builds only).
   useEffect(() => {
@@ -125,7 +125,7 @@ export default function FileBrowser({
       const rect = sidebarElement.getBoundingClientRect();
       const relativeY = moveEvent.clientY - rect.top;
       const percent = Math.max(15, Math.min(80, (relativeY / rect.height) * 100));
-      setWorkspaceHeightPercent(percent);
+      setTopSectionHeightPercent(percent);
     };
 
     const handleMouseUp = () => {
@@ -850,112 +850,15 @@ export default function FileBrowser({
         </div>
       </div>
 
-      {/* Workspaces Section (Upper Sidebar Pane) */}
-      <div
-        className="sidebar-section workspace"
-        onClick={() => {
-          setActiveSection("workspace");
-        }}
-        style={{
-          height: `${workspaceHeightPercent}%`,
-          flex: "none",
-        }}
-      >
-        <div className="sidebar-subheader">
-          <span className="sidebar-section-title">
-            <Pin className="w-3.5 h-3.5 text-accent" style={{ fill: "var(--accent)" }} />
-            <span>Workspaces</span>
-          </span>
-          {storage.capabilities.documentPicker && (
-            <button
-              className="file-action-btn"
-              tabIndex={-1}
-              disabled={isPicking}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={(e) => {
-                e.stopPropagation();
-                handleAddFolder();
-              }}
-              title="Add a folder from Files / iCloud Drive"
-              style={{ opacity: 0.8 }}
-            >
-              {isPicking ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <FolderPlus className="w-3.5 h-3.5" />
-              )}
-            </button>
-          )}
-        </div>
-        <div className="sidebar-scroll-content">
-          {sortedPinned.length === 0 ? (
-            <div style={{ padding: "16px", textAlign: "center", fontSize: "12px", color: "var(--text-secondary)", opacity: 0.7 }}>
-              No pinned workspaces.
-            </div>
-          ) : (
-            <div className="workspace-list">
-              {sortedPinned.map((item, index) => {
-                const isFocused = activeSection === "workspace" && focusedWorkspaceIndex === index;
-                return (
-                  <div
-                    key={item.path}
-                    className={`workspace-item ${isFocused ? "keyboard-focused" : ""}`}
-                    onClick={() => {
-                      setActiveSection("workspace");
-                      setFocusedWorkspaceIndex(index);
-                      if (item.isDir) {
-                        setCurrentPath(item.path);
-                        if (viewMode === "tree") {
-                          setTreeRootPath(item.path);
-                        }
-                      } else {
-                        onSelectFile(item.path);
-                      }
-                    }}
-                    title={item.path}
-                  >
-                    <div className="workspace-item-info">
-                      {item.isDir ? (
-                        <Folder style={{ width: "15px", height: "15px", color: "var(--accent)" }} />
-                      ) : (
-                        <FileText style={{ width: "15px", height: "15px", color: "var(--text-secondary)" }} />
-                      )}
-                      <div className="workspace-item-text">
-                        <span className="workspace-item-name">{getFolderName(item.path)}</span>
-                        <span className="workspace-item-path">{item.path}</span>
-                      </div>
-                    </div>
-                    <div className="workspace-item-actions">
-                      <button
-                        className="workspace-action-btn"
-                        tabIndex={-1}
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleUnpin(item.path);
-                          sidebarRef.current?.focus();
-                        }}
-                        title={item.isDir ? "Unpin folder" : "Unpin file"}
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Horizontal Drag Resizer divider */}
-      <div className="section-resizer" onMouseDown={startSectionResize} />
-
-      {/* Folders Section (Lower Sidebar Pane) */}
+      {/* Folders Section (Upper Sidebar Pane) */}
       <div
         className="sidebar-section folders"
         onClick={() => {
           setActiveSection("folders");
+        }}
+        style={{
+          height: `${topSectionHeightPercent}%`,
+          flex: "none",
         }}
       >
         <div className="sidebar-subheader">
@@ -1473,6 +1376,103 @@ export default function FileBrowser({
                   );
                 })
               )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Horizontal Drag Resizer divider */}
+      <div className="section-resizer" onMouseDown={startSectionResize} />
+
+      {/* Workspaces Section (Lower Sidebar Pane) */}
+      <div
+        className="sidebar-section workspace"
+        onClick={() => {
+          setActiveSection("workspace");
+        }}
+      >
+        <div className="sidebar-subheader">
+          <span className="sidebar-section-title">
+            <Pin className="w-3.5 h-3.5 text-accent" style={{ fill: "var(--accent)" }} />
+            <span>Workspaces</span>
+          </span>
+          {storage.capabilities.documentPicker && (
+            <button
+              className="file-action-btn"
+              tabIndex={-1}
+              disabled={isPicking}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleAddFolder();
+              }}
+              title="Add a folder from Files / iCloud Drive"
+              style={{ opacity: 0.8 }}
+            >
+              {isPicking ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <FolderPlus className="w-3.5 h-3.5" />
+              )}
+            </button>
+          )}
+        </div>
+        <div className="sidebar-scroll-content">
+          {sortedPinned.length === 0 ? (
+            <div style={{ padding: "16px", textAlign: "center", fontSize: "12px", color: "var(--text-secondary)", opacity: 0.7 }}>
+              No pinned workspaces.
+            </div>
+          ) : (
+            <div className="workspace-list">
+              {sortedPinned.map((item, index) => {
+                const isFocused = activeSection === "workspace" && focusedWorkspaceIndex === index;
+                return (
+                  <div
+                    key={item.path}
+                    className={`workspace-item ${isFocused ? "keyboard-focused" : ""}`}
+                    onClick={() => {
+                      setActiveSection("workspace");
+                      setFocusedWorkspaceIndex(index);
+                      if (item.isDir) {
+                        setCurrentPath(item.path);
+                        if (viewMode === "tree") {
+                          setTreeRootPath(item.path);
+                        }
+                      } else {
+                        onSelectFile(item.path);
+                      }
+                    }}
+                    title={item.path}
+                  >
+                    <div className="workspace-item-info">
+                      {item.isDir ? (
+                        <Folder style={{ width: "15px", height: "15px", color: "var(--accent)" }} />
+                      ) : (
+                        <FileText style={{ width: "15px", height: "15px", color: "var(--text-secondary)" }} />
+                      )}
+                      <div className="workspace-item-text">
+                        <span className="workspace-item-name">{getFolderName(item.path)}</span>
+                        <span className="workspace-item-path">{item.path}</span>
+                      </div>
+                    </div>
+                    <div className="workspace-item-actions">
+                      <button
+                        className="workspace-action-btn"
+                        tabIndex={-1}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleUnpin(item.path);
+                          sidebarRef.current?.focus();
+                        }}
+                        title={item.isDir ? "Unpin folder" : "Unpin file"}
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

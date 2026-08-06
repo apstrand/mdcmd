@@ -214,14 +214,14 @@ body {
   overflow: hidden;
 }
 
-.sidebar-section.workspace {
+.sidebar-section.folders {
   border-bottom: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
-.sidebar-section.folders {
+.sidebar-section.workspace {
   display: flex;
   flex-direction: column;
   overflow: hidden;

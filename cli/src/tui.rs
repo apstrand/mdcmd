@@ -1677,8 +1677,8 @@ impl AppState {
         let sidebar_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Percentage(35),
                 Constraint::Percentage(65),
+                Constraint::Percentage(35),
             ])
             .split(pane_chunks[0]);
 
@@ -1727,7 +1727,7 @@ impl AppState {
             .block(workspaces_block);
             
         self.workspace_list_state.select(Some(self.workspace_index));
-        f.render_stateful_widget(workspaces_list, sidebar_chunks[0], &mut self.workspace_list_state);
+        f.render_stateful_widget(workspaces_list, sidebar_chunks[1], &mut self.workspace_list_state);
 
         // Render Directory Folders
         let folders_border_color = if self.active_section == ActiveSection::Folders {
@@ -1897,7 +1897,7 @@ impl AppState {
             .block(folders_block);
 
         self.folder_list_state.select(Some(self.folder_index));
-        f.render_stateful_widget(folders_list, sidebar_chunks[1], &mut self.folder_list_state);
+        f.render_stateful_widget(folders_list, sidebar_chunks[0], &mut self.folder_list_state);
 
         // Render Tabs and Content area
         let content_area = if !self.open_files.is_empty() {
