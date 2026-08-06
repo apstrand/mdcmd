@@ -1,0 +1,48 @@
+app-id: com.mdcmd.App
+runtime: org.gnome.Platform
+runtime-version: "50"
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+  - org.freedesktop.Sdk.Extension.node24
+
+command: mdcmd
+
+finish-args:
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  - --device=dri
+  - --filesystem=home
+  - --share=network
+
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/node24/bin
+  env:
+    CARGO_HOME: /run/build/mdcmd/cargo
+    CARGO_NET_OFFLINE: "true"
+    XDG_CACHE_HOME: /run/build/mdcmd/flatpak-node/cache
+    npm_config_cache: /run/build/mdcmd/flatpak-node/npm-cache
+    npm_config_offline: "true"
+
+modules:
+  - name: mdcmd
+    buildsystem: simple
+    build-commands:
+      - npm ci --offline
+      - npx tauri build --no-bundle
+      - install -Dm755 src-tauri/target/release/mdcmd /app/bin/mdcmd
+      - install -Dm644 com.mdcmd.App.desktop /app/share/applications/com.mdcmd.App.desktop
+      - install -Dm644 com.mdcmd.App.metainfo.xml /app/share/metainfo/com.mdcmd.App.metainfo.xml
+      - install -Dm644 src-tauri/icons/128x128.png /app/share/icons/hicolor/128x128/apps/com.mdcmd.App.png
+    sources:
+      - type: git
+        url: https://github.com/apstrand/mdcmd.git
+        tag: v0.1.6
+        commit: fe7bf4b44989fa2d58634f6b930e77cebc04e1bb
+      - type: file
+        path: com.mdcmd.App.desktop
+      - type: file
+        path: com.mdcmd.App.metainfo.xml
+      - cargo-sources.json
+      - node-sources.json

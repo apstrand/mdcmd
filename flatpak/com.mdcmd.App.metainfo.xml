@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.mdcmd.App</id>
+  <name>MarkDown Commander</name>
+  <summary>A dual-pane file manager for Markdown workspaces</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <description>
+    <p>
+      MarkDown Commander is a folder and workspace browser for Markdown files,
+      with an embedded terminal.
+    </p>
+  </description>
+  <launchable type="desktop-id">com.mdcmd.App.desktop</launchable>
+  <url type="homepage">https://github.com/apstrand/mdcmd</url>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="0.1.6" date="2026-08-05" />
+  </releases>
+</component>

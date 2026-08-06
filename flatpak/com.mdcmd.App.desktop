@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=MarkDown Commander
+Comment=MarkDown Commander
+Exec=mdcmd %U
+Icon=com.mdcmd.App
+Terminal=false
+Categories=Office;TextEditor;
+MimeType=text/markdown;
