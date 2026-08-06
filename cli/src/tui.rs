@@ -138,6 +138,12 @@ pub struct AppState {
     pub image_protocol: Option<ratatui_image::protocol::StatefulProtocol>,
     pub pty_session: Option<PtySession>,
     pub last_content_area: Rect,
+    /// The viewer inner width `image_blocks` was last sized for. Compared
+    /// against the current width each frame so images get relaid-out after
+    /// a resize instead of keeping stale, wrongly-proportioned reserved
+    /// rows — including right after startup, when a file passed on the
+    /// command line is loaded before the real terminal size is known.
+    pub image_layout_width: u16,
 }
 
 
@@ -202,6 +208,7 @@ impl AppState {
             image_protocol: None,
             pty_session: None,
             last_content_area: Rect::new(0, 0, 80, 24),
+            image_layout_width: 0,
         };
 
         app.reload_directory();
@@ -618,6 +625,11 @@ impl AppState {
                 self.file_content = Some(text);
                 self.line_map = line_map;
                 self.image_blocks = image_blocks;
+                // Forces a relayout on the next draw() once the real viewer
+                // width is known — `last_content_area` may still be the
+                // startup placeholder right now (e.g. a file opened via a
+                // command-line argument, before the first frame has drawn).
+                self.image_layout_width = 0;
                 self.selected_file = Some(path);
                 self.scroll_offset = 0;
                 self.error = None;
@@ -650,7 +662,10 @@ impl AppState {
         }
 
         let base_dir = file_path.parent().map(Path::to_path_buf);
-        let avail_cols = self.last_content_area.width.saturating_sub(4).clamp(20, 70);
+        // Matches `inner.width` in `render_inline_images` exactly (viewer
+        // pane minus its 1-cell border on each side) so the rows reserved
+        // here line up with the width the image actually renders at.
+        let avail_cols = self.last_content_area.width.saturating_sub(2).clamp(20, 70);
         let font = self.image_picker.font_size();
 
         let mut image_blocks = Vec::new();
@@ -695,6 +710,24 @@ impl AppState {
         }
 
         (text, line_map, image_blocks)
+    }
+
+    /// Re-parses the current file and re-runs `load_inline_images` against
+    /// the current viewer width. Called from `draw()` whenever that width
+    /// no longer matches what `image_blocks` was last sized for, since the
+    /// reserved row count depends on it.
+    fn relayout_inline_images(&mut self) {
+        let Some(file_path) = self.selected_file.clone() else { return };
+        if is_media_file(&file_path.to_string_lossy()) {
+            return;
+        }
+        let Ok(content) = fs::read_to_string(&file_path) else { return };
+        let parsed = parse_markdown(&content, &self.palette);
+        let (text, line_map, image_blocks) = self.load_inline_images(&file_path, parsed);
+        self.file_lines_count = text.lines.len();
+        self.file_content = Some(text);
+        self.line_map = line_map;
+        self.image_blocks = image_blocks;
     }
 
     pub fn close_file(&mut self, path: PathBuf) {
@@ -2070,6 +2103,11 @@ impl AppState {
             .border_style(Style::default().fg(viewer_border_color));
 
         self.last_content_area = content_area;
+        let viewer_inner_width = content_area.width.saturating_sub(2);
+        if viewer_inner_width != self.image_layout_width && self.selected_file.is_some() {
+            self.image_layout_width = viewer_inner_width;
+            self.relayout_inline_images();
+        }
         if let Some(session) = self.pty_session.as_mut() {
             session.resize(
                 content_area.width.saturating_sub(2),
