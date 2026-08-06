@@ -1621,6 +1621,13 @@ impl AppState {
         let cols = area.width.saturating_sub(2).max(10);
         let rows = area.height.saturating_sub(2).max(3);
 
+        // Map the wrapped-row scroll position back to a raw source line so
+        // the editor opens with the same area in view as the viewer showed.
+        let line_number = self.file_content.as_ref().map(|text| {
+            let ridx = rendered_line_for_scroll(text, self.scroll_offset, cols);
+            self.line_map.get(ridx).copied().unwrap_or(0) + 1
+        });
+
         let pty_system = NativePtySystem::default();
         let pair = pty_system.openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })?;
 
@@ -1628,7 +1635,7 @@ impl AppState {
         let cwd = file_path.parent().map(|p| p.to_path_buf());
         let build_cmd = |program: &str| {
             let mut cmd = CommandBuilder::new(program);
-            cmd.arg(&file_path);
+            apply_line_offset(&mut cmd, program, &file_path, line_number);
             if let Some(dir) = &cwd {
                 cmd.cwd(dir);
             }
@@ -2529,6 +2536,37 @@ impl AppState {
     }
 }
 
+/// Appends the file (and, for editors known to support it, a starting-line
+/// flag) to `cmd`, so the editor opens showing roughly the same region the
+/// internal viewer had scrolled to. Editors we don't recognize just get the
+/// bare path — passing an unsupported flag could break the launch entirely.
+fn apply_line_offset(cmd: &mut CommandBuilder, program: &str, path: &Path, line: Option<usize>) {
+    let line = match line {
+        Some(l) if l > 0 => l,
+        _ => {
+            cmd.arg(path);
+            return;
+        }
+    };
+    let basename = Path::new(program)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(program)
+        .to_lowercase();
+    match basename.as_str() {
+        "vim" | "nvim" | "vi" | "gvim" | "view" | "nano" | "emacs" => {
+            cmd.arg(format!("+{}", line));
+            cmd.arg(path);
+        }
+        "micro" | "hx" | "helix" => {
+            cmd.arg(format!("{}:{}", path.to_string_lossy(), line));
+        }
+        _ => {
+            cmd.arg(path);
+        }
+    }
+}
+
 /// Encode a crossterm key event as the raw bytes a real terminal would send
 /// for it, so it can be written straight into a PTY's input. Covers the
 /// keys interactive editors (vim, nano, ...) actually rely on: control
@@ -2608,6 +2646,27 @@ fn wrapped_row_offset(text: &Text<'static>, upto_line: usize, width: u16) -> u16
     let upto_line = upto_line.min(text.lines.len());
     let prefix = Text::from(text.lines[..upto_line].to_vec());
     Paragraph::new(prefix).wrap(Wrap { trim: false }).line_count(width) as u16
+}
+
+/// Reverses `wrapped_row_offset`: given a wrapped-row scroll position,
+/// finds the rendered line whose visible top-of-viewport row that is.
+fn rendered_line_for_scroll(text: &Text<'static>, scroll_offset: usize, width: u16) -> usize {
+    let n = text.lines.len();
+    if n == 0 {
+        return 0;
+    }
+    let mut lo = 0usize;
+    let mut hi = n;
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        let row = wrapped_row_offset(text, mid, width) as usize;
+        if row <= scroll_offset {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    lo.saturating_sub(1).min(n - 1)
 }
 
 pub fn is_media_file(path: &str) -> bool {
