@@ -333,6 +333,13 @@ impl AppState {
         results
     }
 
+    /// Keeps `cached_search_results` — what the folder pane actually renders
+    /// and navigates — in sync with `search_query`. Must be called after any
+    /// change to `search_query` so filtering stays live as the user types.
+    fn refresh_search_cache(&mut self) {
+        self.cached_search_results = self.search_query.as_ref().map(|q| self.get_search_results(q));
+    }
+
     fn walk_search_local(&self, dir: &Path, query_lower: &str, results: &mut Vec<FileEntry>) {
         if let Ok(entries) = list_directory(dir) {
             for entry in entries {
@@ -353,6 +360,8 @@ impl AppState {
                 self.search_active = false;
                 self.search_query = None;
                 self.search_input.clear();
+                self.folder_index = 0;
+                self.refresh_search_cache();
                 self.clamp_folder_index();
             }
             KeyCode::Enter => {
@@ -363,6 +372,7 @@ impl AppState {
                     self.search_query = None;
                 }
                 self.folder_index = 0;
+                self.refresh_search_cache();
                 self.clamp_folder_index();
             }
             KeyCode::Backspace => {
@@ -373,12 +383,14 @@ impl AppState {
                     Some(self.search_input.clone())
                 };
                 self.folder_index = 0;
+                self.refresh_search_cache();
                 self.clamp_folder_index();
             }
             KeyCode::Char(c) => {
                 self.search_input.push(c);
                 self.search_query = Some(self.search_input.clone());
                 self.folder_index = 0;
+                self.refresh_search_cache();
                 self.clamp_folder_index();
             }
             _ => {}
@@ -984,6 +996,7 @@ impl AppState {
             KeyCode::Esc => {
                 if self.search_query.is_some() {
                     self.search_query = None;
+                    self.cached_search_results = None;
                     self.folder_index = 0;
                     self.clamp_folder_index();
                     true
@@ -1140,7 +1153,9 @@ impl AppState {
                 }
                 KeyCode::Left | KeyCode::Char('h') | KeyCode::Backspace | KeyCode::Char('u') => {
                     self.search_query = None;
-                    self.go_up_directory();
+                    self.cached_search_results = None;
+                    self.folder_index = 0;
+                    self.clamp_folder_index();
                 }
                 KeyCode::Char('p') => {
                     if !results.is_empty() {
