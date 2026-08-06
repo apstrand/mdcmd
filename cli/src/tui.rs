@@ -4,7 +4,7 @@ use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Rect, Size},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Padding, Paragraph, Wrap},
@@ -13,6 +13,7 @@ use ratatui::{
 use crossterm::event::{self, KeyCode, KeyModifiers};
 use anyhow::Result;
 use ratatui_image::{Resize, StatefulImage};
+use ratatui_image::sliced::{SignedPosition, SlicedImage, SlicedProtocol};
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use tui_term::widget::PseudoTerminal;
 
@@ -98,8 +99,10 @@ impl PtySession {
 pub struct InlineImage {
     line: usize,
     rows: u16,
-    cols: u16,
-    protocol: Option<ratatui_image::protocol::StatefulProtocol>,
+    /// A `SlicedProtocol` (rather than the `StatefulProtocol` used for
+    /// standalone media files) so partially-scrolled images are cropped to
+    /// their visible rows instead of only rendering once fully in view.
+    protocol: Option<SlicedProtocol>,
 }
 
 pub struct AppState {
@@ -693,7 +696,11 @@ impl AppState {
                 let (iw, ih) = (img.width().max(1), img.height().max(1));
                 let px_w = avail_cols as u32 * font.width.max(1) as u32;
                 let px_h = px_w * ih / iw;
-                let rows = px_h.div_ceil(font.height.max(1) as u32).clamp(4, 30) as u16;
+                // No upper clamp beyond a sanity ceiling: images render
+                // cropped to whatever's on-screen (see `render_inline_images`),
+                // so a tall portrait image reserving many rows just scrolls
+                // like any other content instead of needing to fit onscreen.
+                let rows = px_h.div_ceil(font.height.max(1) as u32).clamp(4, 120) as u16;
 
                 if rows > 1 {
                     let blank_count = (rows - 1) as usize;
@@ -704,8 +711,10 @@ impl AppState {
                     offset += blank_count;
                 }
 
-                let protocol = self.image_picker.new_resize_protocol(img);
-                image_blocks.push(InlineImage { line, rows, cols: avail_cols, protocol: Some(protocol) });
+                let size = Size::new(avail_cols, rows);
+                if let Ok(protocol) = SlicedProtocol::new(&self.image_picker, img, Some(size)) {
+                    image_blocks.push(InlineImage { line, rows, protocol: Some(protocol) });
+                }
             }
         }
 
@@ -2279,27 +2288,26 @@ impl AppState {
         }
     }
 
-    /// Overlays any inline images from `image_blocks` that are fully within
-    /// `inner`'s visible rows for the current scroll position. Partially
-    /// scrolled images are skipped rather than drawn squished, since the
-    /// terminal graphics protocols resize-to-fit the given area rather than
-    /// cropping — they'll pop back in once fully scrolled into view.
+    /// Overlays any inline images from `image_blocks` that overlap `inner`'s
+    /// visible rows for the current scroll position, using `SlicedImage` so
+    /// a partially-scrolled image is cropped to just its visible rows
+    /// (rather than being resized-to-fit and looking squished).
     fn render_inline_images(&mut self, f: &mut Frame<'_>, text: &Text<'static>, inner: Rect) {
         if self.image_blocks.is_empty() || inner.width == 0 || inner.height == 0 {
             return;
         }
         let wrap_width = inner.width;
         let scroll = self.scroll_offset as u16;
-        for img in self.image_blocks.iter_mut() {
-            let Some(protocol) = img.protocol.as_mut() else { continue };
+        for img in self.image_blocks.iter() {
+            let Some(protocol) = img.protocol.as_ref() else { continue };
             let top = wrapped_row_offset(text, img.line, wrap_width) as i32 - scroll as i32;
             let bottom = top + img.rows as i32;
-            if top < 0 || bottom > inner.height as i32 {
+            if bottom <= 0 || top >= inner.height as i32 {
                 continue;
             }
-            let width = img.cols.min(inner.width).max(1);
-            let rect = Rect::new(inner.x, inner.y + top as u16, width, img.rows);
-            f.render_stateful_widget(StatefulImage::new().resize(Resize::Fit(None)), rect, protocol);
+            let top = top.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+            let position = SignedPosition::from((0, top));
+            f.render_widget(SlicedImage::new(protocol, position), inner);
         }
     }
 
