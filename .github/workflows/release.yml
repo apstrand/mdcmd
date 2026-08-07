@@ -108,6 +108,81 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
+          # The macOS and Linux matrix jobs run in parallel and both publish to
+          # the same release. If both also wrote latest.json they would race and
+          # could leave the manifest pointing at a signature from the other
+          # job's (or a re-run's) build — which is exactly how v0.1.7 shipped a
+          # darwin signature that didn't match the uploaded .app.tar.gz, breaking
+          # the macOS auto-updater. So neither job writes the manifest; the
+          # dedicated updater-manifest job below regenerates it once, from the
+          # authoritative .sig assets, after both builds finish.
+          includeUpdaterJson: false
+
+  # Rebuild latest.json from the signatures actually attached to the release,
+  # after every platform has finished uploading. This is race-free and
+  # self-healing: re-running it always regenerates the manifest to match
+  # whatever .sig files are currently on the release.
+  updater-manifest:
+    name: Publish updater manifest
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Regenerate and upload latest.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          workdir="$(mktemp -d)"
+          cd "$workdir"
+          # Grab every updater signature the matrix jobs attached to the release.
+          gh release download "$TAG" -R "$REPO" -p '*.sig' --dir .
+          python3 - "${TAG#v}" > latest.json <<'PY'
+          import datetime, glob, json, os, sys
+
+          version = sys.argv[1]
+          tag = os.environ["TAG"]
+          base = f"https://github.com/{os.environ['REPO']}/releases/download/{tag}"
+
+          # tauri's latest.json "signature" field is the verbatim content of the
+          # bundle's .sig file, so we copy it through unchanged.
+          def read_sig(asset):
+              with open(asset + ".sig") as f:
+                  return f.read().strip()
+
+          platforms = {}
+          def add(keys, asset):
+              entry = {"signature": read_sig(asset), "url": f"{base}/{asset}"}
+              for key in keys:
+                  platforms[key] = entry
+
+          for sig in glob.glob("*.sig"):
+              asset = sig[:-4]
+              if asset.endswith(".app.tar.gz"):
+                  # Universal macOS build serves both arches.
+                  add(["darwin-aarch64", "darwin-x86_64",
+                       "darwin-aarch64-app", "darwin-x86_64-app"], asset)
+              elif asset.endswith(".AppImage"):
+                  add(["linux-x86_64", "linux-x86_64-appimage"], asset)
+              elif asset.endswith(".deb"):
+                  add(["linux-x86_64-deb"], asset)
+              elif asset.endswith(".rpm"):
+                  add(["linux-x86_64-rpm"], asset)
+
+          assert "darwin-aarch64" in platforms, "no macOS signature found on release"
+          assert "linux-x86_64" in platforms, "no Linux signature found on release"
+
+          json.dump({
+              "version": version,
+              "notes": f"Automated release for version {tag}.",
+              "pub_date": datetime.datetime.now(datetime.timezone.utc)
+                  .isoformat().replace("+00:00", "Z"),
+              "platforms": platforms,
+          }, sys.stdout, indent=2)
+          PY
+          cat latest.json
+          gh release upload "$TAG" -R "$REPO" latest.json --clobber
 
   flatpak:
     name: Build Flatpak
