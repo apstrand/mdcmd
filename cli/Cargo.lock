@@ -1130,7 +1130,7 @@ dependencies = [
 
 [[package]]
 name = "mdc"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "anyhow",
  "crossterm 0.29.0",
