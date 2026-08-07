@@ -3,6 +3,8 @@
 # Bumps the shared release version across every place it's duplicated:
 #   - package.json (and package-lock.json, via `npm version`)
 #   - cli/Cargo.toml (and cli/Cargo.lock)
+#   - src-tauri/Cargo.toml (and src-tauri/Cargo.lock) — this is what the
+#     desktop GUI shows, via env!("CARGO_PKG_VERSION")
 #   - flatpak/com.mdcmd.App.yml's git source `tag:` pin
 #
 # Does not touch git: no commit, tag, or push. Run this, review the diff,
@@ -44,7 +46,15 @@ sed -i "0,/^version = \".*\"/s//version = \"$NEW_VERSION\"/" cli/Cargo.toml
 echo "-> cli/Cargo.lock"
 (cd cli && cargo check --offline --quiet 2>/dev/null || cargo check --quiet)
 
-# 3. flatpak manifest's git source pin. Only the tag: local dev builds off
+# 3. src-tauri/Cargo.toml — same first-`version =` trick as cli. The desktop
+#    GUI's version footer reads this via env!("CARGO_PKG_VERSION").
+echo "-> src-tauri/Cargo.toml"
+sed -i "0,/^version = \".*\"/s//version = \"$NEW_VERSION\"/" src-tauri/Cargo.toml
+
+echo "-> src-tauri/Cargo.lock"
+(cd src-tauri && cargo check --offline --quiet 2>/dev/null || cargo check --quiet)
+
+# 4. flatpak manifest's git source pin. Only the tag: local dev builds off
 #    this; CI (release.yml) overwrites both tag: and commit: with the
 #    actual release tag/commit at build time, so commit: is left alone here
 #    (it would need the bump commit's own hash, which doesn't exist yet).
@@ -53,10 +63,10 @@ sed -i "s/tag: .*/tag: v$NEW_VERSION/" flatpak/com.mdcmd.App.yml
 
 echo "============================================="
 echo "Done. Changed files:"
-git diff --stat -- package.json package-lock.json cli/Cargo.toml cli/Cargo.lock flatpak/com.mdcmd.App.yml
+git diff --stat -- package.json package-lock.json cli/Cargo.toml cli/Cargo.lock src-tauri/Cargo.toml src-tauri/Cargo.lock flatpak/com.mdcmd.App.yml
 echo "============================================="
 echo "Next steps:"
-echo "  git add package.json package-lock.json cli/Cargo.toml cli/Cargo.lock flatpak/com.mdcmd.App.yml"
+echo "  git add package.json package-lock.json cli/Cargo.toml cli/Cargo.lock src-tauri/Cargo.toml src-tauri/Cargo.lock flatpak/com.mdcmd.App.yml"
 echo "  git commit -m \"bump version to $NEW_VERSION\""
 echo "  git tag v$NEW_VERSION"
 echo "  git push && git push origin v$NEW_VERSION"
