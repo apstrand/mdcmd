@@ -193,6 +193,27 @@ function TerminalSession({
         foreground: "hsl(210, 40%, 98%)",
         cursor: "var(--accent)",
         selectionBackground: "rgba(56, 189, 248, 0.3)",
+        // xterm's default ANSI palette assumes a light terminal background:
+        // "black" is pure #000 and "brightBlack" is #666, both nearly
+        // invisible against this app's near-black terminal background. CLI
+        // tools routinely use these for dim/muted text (git, ls, prompts),
+        // so without an override that text disappears in dark mode.
+        black: "#5c6370",
+        red: "#e06c75",
+        green: "#98c379",
+        yellow: "#e5c07b",
+        blue: "#61afef",
+        magenta: "#c678dd",
+        cyan: "#56b6c2",
+        white: "#d3d3d3",
+        brightBlack: "#7f848e",
+        brightRed: "#e06c75",
+        brightGreen: "#98c379",
+        brightYellow: "#e5c07b",
+        brightBlue: "#61afef",
+        brightMagenta: "#c678dd",
+        brightCyan: "#56b6c2",
+        brightWhite: "#ffffff",
       },
       allowProposedApi: true,
     });
