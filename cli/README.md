@@ -13,7 +13,9 @@ Markdown editor, built with [ratatui](https://ratatui.rs) and
 
 - **Local file navigation** — browse folders in either a flat **List** or an
   expandable **Tree** view, move up and down the directory hierarchy, and filter
-  entries as you type.
+  entries as you type. The current folder is watched for filesystem changes, so
+  files and folders created, removed, or renamed outside `mdc` show up
+  automatically.
 - **Markdown preview** — render `.md` files directly in the terminal with styled
   headings, code blocks, and inline formatting. Media files are recognized too.
 - **Tabs** — open multiple files at once and cycle between them.
@@ -76,6 +78,7 @@ mdc ~/notes
 | `w` / `c` | Close the active file/tab |
 | `t` | Open a terminal in the current directory |
 | `n` | Create a new file in the current directory |
+| `N` | Create a new folder in the current directory |
 | `e` | Edit the selected Markdown file in `$EDITOR` |
 | `o` | Open the selected file in the host default GUI app |
 | `y` / `Y` | Copy selected file path / name to clipboard |

@@ -99,6 +99,7 @@ fn main() -> Result<()> {
             terminal.clear()?;
             app.needs_clear = false;
         }
+        app.poll_fs_events();
         terminal.draw(|f| app.draw(f))?;
 
         // An inline editor session needs to redraw promptly as the child

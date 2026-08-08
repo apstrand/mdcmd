@@ -12,6 +12,7 @@ use ratatui::{
 };
 use crossterm::event::{self, KeyCode, KeyModifiers};
 use anyhow::Result;
+use notify::Watcher;
 use ratatui_image::{Resize, StatefulImage};
 use ratatui_image::sliced::{SignedPosition, SlicedImage, SlicedProtocol};
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
@@ -130,6 +131,7 @@ pub struct AppState {
     pub search_query: Option<String>,
     pub create_active: bool,
     pub create_input: String,
+    pub create_is_dir: bool,
     pub status_message: Option<String>,
     pub workspace_list_state: ListState,
     pub folder_list_state: ListState,
@@ -147,6 +149,11 @@ pub struct AppState {
     /// rows — including right after startup, when a file passed on the
     /// command line is loaded before the real terminal size is known.
     pub image_layout_width: u16,
+    /// Filesystem watcher for `watched_dir`, kept alive so it keeps
+    /// delivering events; dropped/recreated whenever `current_dir` changes.
+    watcher: Option<notify::RecommendedWatcher>,
+    watch_rx: Option<std::sync::mpsc::Receiver<notify::Result<notify::Event>>>,
+    watched_dir: Option<PathBuf>,
 }
 
 
@@ -200,6 +207,7 @@ impl AppState {
             search_query: None,
             create_active: false,
             create_input: String::new(),
+            create_is_dir: false,
             status_message: None,
             workspace_list_state: ListState::default(),
             folder_list_state: ListState::default(),
@@ -212,6 +220,9 @@ impl AppState {
             pty_session: None,
             last_content_area: Rect::new(0, 0, 80, 24),
             image_layout_width: 0,
+            watcher: None,
+            watch_rx: None,
+            watched_dir: None,
         };
 
         app.reload_directory();
@@ -423,7 +434,21 @@ impl AppState {
                 if !name.is_empty() {
                     let new_path = self.current_dir.join(&name);
                     if new_path.exists() {
-                        self.error = Some(format!("File already exists: {}", name));
+                        let kind = if self.create_is_dir { "Folder" } else { "File" };
+                        self.error = Some(format!("{} already exists: {}", kind, name));
+                    } else if self.create_is_dir {
+                        match fs::create_dir_all(&new_path) {
+                            Ok(_) => {
+                                self.reload_directory();
+                                self.status_message = Some(format!("Created folder: {}", name));
+                                if let Some(idx) = self.entries.iter().position(|e| PathBuf::from(&e.path) == new_path) {
+                                    self.folder_index = idx;
+                                }
+                            }
+                            Err(e) => {
+                                self.error = Some(format!("Error creating folder: {}", e));
+                            }
+                        }
                     } else {
                         if let Some(parent) = new_path.parent() {
                             let _ = fs::create_dir_all(parent);
@@ -536,7 +561,52 @@ impl AppState {
         }
     }
 
+    /// (Re)arms the filesystem watcher on `current_dir` if it isn't already
+    /// watching it. Cheap no-op when the directory hasn't changed, so it's
+    /// safe to call from `reload_directory()` on every refresh.
+    fn ensure_watcher(&mut self) {
+        if self.watched_dir.as_deref() == Some(self.current_dir.as_path()) {
+            return;
+        }
+        self.watcher = None;
+        self.watch_rx = None;
+        self.watched_dir = None;
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        if let Ok(mut watcher) = notify::recommended_watcher(move |res| {
+            let _ = tx.send(res);
+        }) {
+            if watcher.watch(&self.current_dir, notify::RecursiveMode::NonRecursive).is_ok() {
+                self.watcher = Some(watcher);
+                self.watch_rx = Some(rx);
+                self.watched_dir = Some(self.current_dir.clone());
+            }
+        }
+    }
+
+    /// Drains any pending filesystem-change events for `current_dir` and
+    /// reloads the listing if something changed. Called every iteration of
+    /// the main loop so the List view stays live without user input; the
+    /// Tree view already re-reads the filesystem on every draw.
+    pub fn poll_fs_events(&mut self) {
+        let mut changed = false;
+        if let Some(rx) = &self.watch_rx {
+            while let Ok(res) = rx.try_recv() {
+                if res.is_ok() {
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            self.reload_directory();
+            if let Some(q) = self.search_query.clone() {
+                self.cached_search_results = Some(self.get_search_results(&q));
+            }
+        }
+    }
+
     pub fn reload_directory(&mut self) {
+        self.ensure_watcher();
         match list_directory(&self.current_dir) {
             Ok(entries) => {
                 self.entries = entries;
@@ -926,6 +996,13 @@ impl AppState {
             KeyCode::Char('n') => {
                 self.create_active = true;
                 self.create_input.clear();
+                self.create_is_dir = false;
+                true
+            }
+            KeyCode::Char('N') => {
+                self.create_active = true;
+                self.create_input.clear();
+                self.create_is_dir = true;
                 true
             }
             KeyCode::Char('y') => {
@@ -2228,11 +2305,16 @@ impl AppState {
         let key_color = accent_color;
 
         if self.create_active {
+            let (label, hint) = if self.create_is_dir {
+                (" 📁 New folder: ", "  (Enter to create, Esc to cancel)")
+            } else {
+                (" 📝 New file: ", "  (Enter to create & edit, Esc to cancel)")
+            };
             let create_line = Line::from(vec![
-                Span::styled(" 📝 New file: ", Style::default().fg(accent_color).add_modifier(Modifier::BOLD)),
+                Span::styled(label, Style::default().fg(accent_color).add_modifier(Modifier::BOLD)),
                 Span::styled(self.create_input.clone(), Style::default().fg(text_primary_color)),
                 Span::styled("█", Style::default().fg(accent_color)),
-                Span::styled("  (Enter to create & edit, Esc to cancel)", Style::default().fg(text_secondary_color)),
+                Span::styled(hint, Style::default().fg(text_secondary_color)),
             ]);
             let help_paragraph = Paragraph::new(create_line).style(Style::default().bg(help_bg));
             f.render_widget(help_paragraph, main_chunks[1]);
@@ -2261,8 +2343,8 @@ impl AppState {
                 Span::styled(" Workspaces |", Style::default().fg(help_fg)),
                 Span::styled(" t", Style::default().fg(key_color).add_modifier(Modifier::BOLD)),
                 Span::styled(" Term |", Style::default().fg(help_fg)),
-                Span::styled(" n", Style::default().fg(key_color).add_modifier(Modifier::BOLD)),
-                Span::styled(" New |", Style::default().fg(help_fg)),
+                Span::styled(" n/N", Style::default().fg(key_color).add_modifier(Modifier::BOLD)),
+                Span::styled(" New file/folder |", Style::default().fg(help_fg)),
                 Span::styled(" y/Y", Style::default().fg(key_color).add_modifier(Modifier::BOLD)),
                 Span::styled(" Copy path/name |", Style::default().fg(help_fg)),
                 Span::styled(" Enter", Style::default().fg(key_color).add_modifier(Modifier::BOLD)),
@@ -2538,8 +2620,8 @@ impl AppState {
                 Span::styled("Open terminal in current directory", Style::default().fg(text_primary_color))
             ]),
             Line::from(vec![
-                Span::styled("    n               : ", Style::default().fg(text_secondary_color)),
-                Span::styled("Create a new file in current directory", Style::default().fg(text_primary_color))
+                Span::styled("    n / N           : ", Style::default().fg(text_secondary_color)),
+                Span::styled("Create a new file / folder in current directory", Style::default().fg(text_primary_color))
             ]),
             Line::from(vec![
                 Span::styled("    y / Y           : ", Style::default().fg(text_secondary_color)),
