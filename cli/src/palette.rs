@@ -31,7 +31,7 @@ impl Palette {
                 text_primary: Color::Rgb(15, 23, 42),        // Dark slate text
                 text_secondary: Color::Rgb(100, 116, 139),   // Muted slate text
                 text_muted: Color::Rgb(71, 85, 105),         // Code-fence marker text
-                text_dimmed: Color::Rgb(156, 163, 175),      // Gray-400 for unselectable files
+                text_dimmed: Color::Rgb(80, 100, 120),       // Unselectable files
                 accent: Color::Rgb(37, 99, 235),             // Vibrant blue accent
                 accent_soft: Color::Rgb(219, 234, 254),      // Light blue highlight background
                 open_bg: Color::Rgb(239, 246, 255),          // Lightest blue tint
@@ -50,7 +50,7 @@ impl Palette {
                 text_primary: Color::Rgb(240, 243, 248),
                 text_secondary: Color::Rgb(148, 161, 178),
                 text_muted: Color::Rgb(100, 116, 139),
-                text_dimmed: Color::Rgb(71, 85, 105),        // slate-600
+                text_dimmed: Color::Rgb(140, 150, 160),
                 accent: Color::Rgb(59, 130, 246),
                 accent_soft: Color::Rgb(30, 58, 138),
                 open_bg: Color::Rgb(15, 32, 66),
