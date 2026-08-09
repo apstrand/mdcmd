@@ -129,6 +129,15 @@ pub struct AppState {
     pub search_active: bool,
     pub search_input: String,
     pub search_query: Option<String>,
+    /// Content search within the Viewer pane ('/' n/p Esc), distinct from
+    /// `search_active`/`search_query` above which filter the Folders list.
+    pub view_search_active: bool,
+    pub view_search_input: String,
+    pub view_search_query: Option<String>,
+    /// (line index into `file_content`, start byte, end byte) for every
+    /// match of `view_search_query`, in top-to-bottom order.
+    pub view_search_matches: Vec<(usize, usize, usize)>,
+    pub view_search_current: usize,
     pub create_active: bool,
     pub create_input: String,
     pub create_is_dir: bool,
@@ -205,6 +214,11 @@ impl AppState {
             search_active: false,
             search_input: String::new(),
             search_query: None,
+            view_search_active: false,
+            view_search_input: String::new(),
+            view_search_query: None,
+            view_search_matches: Vec::new(),
+            view_search_current: 0,
             create_active: false,
             create_input: String::new(),
             create_is_dir: false,
@@ -419,6 +433,120 @@ impl AppState {
         Ok(())
     }
 
+    /// Recomputes `view_search_matches` from `view_search_input` against the
+    /// currently rendered `file_content`. Called live on every keystroke so
+    /// highlighting stays in sync as the user types, mirroring the folder
+    /// search's incremental filtering above.
+    fn recompute_view_search(&mut self) {
+        self.view_search_matches.clear();
+        if self.view_search_input.is_empty() {
+            return;
+        }
+        if let Some(content) = &self.file_content {
+            for (line_idx, line) in content.lines.iter().enumerate() {
+                let line_text = line.to_string();
+                for (start, end) in find_matches_in_line(&line_text, &self.view_search_input) {
+                    self.view_search_matches.push((line_idx, start, end));
+                }
+            }
+        }
+    }
+
+    /// Scrolls so match `idx` is at the top of the viewer pane.
+    fn jump_to_view_match(&mut self, idx: usize) {
+        let Some(&(line_idx, _, _)) = self.view_search_matches.get(idx) else {
+            return;
+        };
+        self.view_search_current = idx;
+        if let Some(text) = &self.file_content {
+            let width = self.last_content_area.width.saturating_sub(2).max(1);
+            self.scroll_offset = wrapped_row_offset(text, line_idx, width) as usize;
+        }
+    }
+
+    /// While typing a query, jumps to the first match at or after the
+    /// current scroll position (vim-style incremental search) instead of
+    /// always snapping back to the very first match in the file.
+    fn jump_to_nearest_view_match(&mut self) {
+        if self.view_search_matches.is_empty() {
+            return;
+        }
+        let width = self.last_content_area.width.saturating_sub(2).max(1);
+        let from_line = self
+            .file_content
+            .as_ref()
+            .map(|t| rendered_line_for_scroll(t, self.scroll_offset, width))
+            .unwrap_or(0);
+        let idx = self
+            .view_search_matches
+            .iter()
+            .position(|&(line, _, _)| line >= from_line)
+            .unwrap_or(0);
+        self.jump_to_view_match(idx);
+    }
+
+    /// Clears an in-progress or confirmed Viewer content search, dropping
+    /// all match highlighting.
+    fn clear_view_search(&mut self) {
+        self.view_search_input.clear();
+        self.view_search_query = None;
+        self.view_search_matches.clear();
+        self.view_search_current = 0;
+    }
+
+    /// Advances to the next (or, with `forward: false`, previous) content
+    /// search match, wrapping around at either end.
+    fn jump_view_search(&mut self, forward: bool) {
+        let n = self.view_search_matches.len();
+        if n == 0 {
+            self.status_message = Some("No matches".to_string());
+            return;
+        }
+        let idx = if forward {
+            (self.view_search_current + 1) % n
+        } else {
+            (self.view_search_current + n - 1) % n
+        };
+        self.jump_to_view_match(idx);
+        self.status_message = Some(format!("Match {}/{}", idx + 1, n));
+    }
+
+    fn handle_key_view_search_input(&mut self, key: event::KeyEvent) -> Result<()> {
+        match key.code {
+            KeyCode::Esc => {
+                self.view_search_active = false;
+                self.clear_view_search();
+            }
+            KeyCode::Enter => {
+                self.view_search_active = false;
+                if self.view_search_matches.is_empty() {
+                    self.status_message = Some(format!("No matches for \"{}\"", self.view_search_input));
+                    self.view_search_query = None;
+                } else {
+                    self.view_search_query = Some(self.view_search_input.clone());
+                    let n = self.view_search_matches.len();
+                    self.status_message = Some(format!(
+                        "{} match{} for \"{}\"",
+                        n,
+                        if n == 1 { "" } else { "es" },
+                        self.view_search_input
+                    ));
+                }
+            }
+            KeyCode::Backspace => {
+                self.view_search_input.pop();
+                self.recompute_view_search();
+                self.jump_to_nearest_view_match();
+            }
+            KeyCode::Char(c) => {
+                self.view_search_input.push(c);
+                self.recompute_view_search();
+                self.jump_to_nearest_view_match();
+            }
+            _ => {}
+        }
+        Ok(())
+    }
 
 
     fn handle_key_create_input(&mut self, key: event::KeyEvent) -> Result<()> {
@@ -626,6 +754,9 @@ impl AppState {
     }
 
     pub fn select_file(&mut self, path: PathBuf) {
+        self.view_search_active = false;
+        self.clear_view_search();
+
         if !self.open_files.contains(&path) {
             self.open_files.push(path.clone());
         }
@@ -930,6 +1061,11 @@ impl AppState {
             return Ok(());
         }
 
+        if self.view_search_active {
+            self.handle_key_view_search_input(key)?;
+            return Ok(());
+        }
+
         // Any key dismisses the "GUI not installed" info panel.
         if self.gui_missing_active {
             self.gui_missing_active = false;
@@ -1118,11 +1254,8 @@ impl AppState {
                     self.cached_search_results = None;
                     self.folder_index = 0;
                     self.clamp_folder_index();
-                    true
-                } else {
-                    self.quit = true;
-                    true
                 }
+                true
             }
             KeyCode::Char('q') => {
                 self.quit = true;
@@ -1667,6 +1800,27 @@ impl AppState {
 
 
     fn handle_key_viewer(&mut self, key: event::KeyEvent) -> Result<()> {
+        // While a content search has live matches, 'n'/'p' cycle them and
+        // Esc ends the search — ahead of those keys' other viewer meanings
+        // (global 'n' = new file, Esc = exit fullscreen/quit).
+        if self.view_search_query.is_some() {
+            match key.code {
+                KeyCode::Char('n') => {
+                    self.jump_view_search(true);
+                    return Ok(());
+                }
+                KeyCode::Char('p') => {
+                    self.jump_view_search(false);
+                    return Ok(());
+                }
+                KeyCode::Esc => {
+                    self.clear_view_search();
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
+
         // 'f' cycles Normal -> Margins -> NoMargins -> Normal; Esc always
         // returns straight to Normal. Handle these before the global keys so
         // Esc doesn't quit the app while in a fullscreen reading mode.
@@ -1696,6 +1850,13 @@ impl AppState {
 
         match key.code {
             KeyCode::Char('?') => self.help_active = !self.help_active,
+            KeyCode::Char('/') => {
+                if self.file_content.is_some() {
+                    self.view_search_active = true;
+                    self.view_search_input.clear();
+                    self.view_search_matches.clear();
+                }
+            }
             KeyCode::Down | KeyCode::Char('j') => {
                 self.scroll_offset = self.scroll_offset.saturating_add(1);
             }
@@ -1848,6 +2009,39 @@ impl AppState {
             let _ = session.writer.flush();
         }
         Ok(())
+    }
+
+    /// `file_content` with any active content-search matches highlighted
+    /// (the current match distinctly from the rest), or a plain clone when
+    /// there's no active search. Used by both the normal and fullscreen
+    /// viewer renderers.
+    fn content_for_display(&self) -> Text<'static> {
+        let Some(text) = self.file_content.as_ref() else {
+            return Text::default();
+        };
+        if self.view_search_matches.is_empty() {
+            return text.clone();
+        }
+
+        let mut by_line: std::collections::HashMap<usize, Vec<(usize, usize, bool)>> = std::collections::HashMap::new();
+        for (i, &(line, start, end)) in self.view_search_matches.iter().enumerate() {
+            by_line.entry(line).or_default().push((start, end, i == self.view_search_current));
+        }
+
+        let match_bg = self.palette.accent_soft;
+        let current_bg = self.palette.accent;
+        let current_fg = self.palette.bg;
+
+        let lines: Vec<Line<'static>> = text
+            .lines
+            .iter()
+            .enumerate()
+            .map(|(idx, line)| match by_line.get(&idx) {
+                Some(ranges) => highlight_line(line, ranges, match_bg, current_bg, current_fg),
+                None => line.clone(),
+            })
+            .collect();
+        Text::from(lines)
     }
 
     pub fn draw(&mut self, f: &mut Frame<'_>) {
@@ -2256,7 +2450,7 @@ impl AppState {
                 }
             } else if self.file_content.is_some() {
                 let inner = viewer_block.inner(content_area);
-                let text = self.file_content.clone().unwrap();
+                let text = self.content_for_display();
                 let paragraph = Paragraph::new(text.clone())
                     .block(viewer_block)
                     .scroll((self.scroll_offset as u16, 0))
@@ -2327,12 +2521,40 @@ impl AppState {
             ]);
             let help_paragraph = Paragraph::new(search_line).style(Style::default().bg(help_bg));
             f.render_widget(help_paragraph, main_chunks[1]);
+        } else if self.view_search_active {
+            let search_line = Line::from(vec![
+                Span::styled(" 🔍 Find in file: ", Style::default().fg(accent_color).add_modifier(Modifier::BOLD)),
+                Span::styled(self.view_search_input.clone(), Style::default().fg(text_primary_color)),
+                Span::styled("█", Style::default().fg(accent_color)),
+                Span::styled("  (Enter to search, Esc to cancel)", Style::default().fg(text_secondary_color)),
+            ]);
+            let help_paragraph = Paragraph::new(search_line).style(Style::default().bg(help_bg));
+            f.render_widget(help_paragraph, main_chunks[1]);
         } else if let Some(ref msg) = self.status_message {
             let msg_span = Span::styled(format!("  ✅ {} ", msg), Style::default().bg(help_bg).fg(accent_color).add_modifier(Modifier::BOLD));
             f.render_widget(Paragraph::new(Line::from(vec![msg_span])).style(Style::default().bg(help_bg)), main_chunks[1]);
         } else if let Some(ref err) = self.error {
             let error_span = Span::styled(format!("  ⚠️ Error: {} ", err), Style::default().bg(Color::Red).fg(Color::White).add_modifier(Modifier::BOLD));
             f.render_widget(Paragraph::new(Line::from(vec![error_span])).style(Style::default().bg(help_bg)), main_chunks[1]);
+        } else if let Some(ref query) = self.view_search_query {
+            let count = self.view_search_matches.len();
+            let position_span = if count > 0 {
+                Span::styled(format!(" {}/{} ", self.view_search_current + 1, count), Style::default().fg(text_primary_color))
+            } else {
+                Span::styled(" 0 matches ", Style::default().fg(text_secondary_color))
+            };
+            let search_line = Line::from(vec![
+                Span::styled(" 🔍 ", Style::default().fg(accent_color).add_modifier(Modifier::BOLD)),
+                Span::styled(format!("\"{}\"", query), Style::default().fg(text_primary_color).add_modifier(Modifier::BOLD)),
+                position_span,
+                Span::styled("|", Style::default().fg(help_fg)),
+                Span::styled(" n/p", Style::default().fg(key_color).add_modifier(Modifier::BOLD)),
+                Span::styled(" next/prev |", Style::default().fg(help_fg)),
+                Span::styled(" Esc", Style::default().fg(key_color).add_modifier(Modifier::BOLD)),
+                Span::styled(" end search", Style::default().fg(help_fg)),
+            ]);
+            let help_paragraph = Paragraph::new(search_line).style(Style::default().bg(help_bg));
+            f.render_widget(help_paragraph, main_chunks[1]);
         } else {
             let help_spans = vec![
                 Span::styled(" Tab", Style::default().fg(key_color).add_modifier(Modifier::BOLD)),
@@ -2361,7 +2583,7 @@ impl AppState {
                 Span::styled(" Open Ext |", Style::default().fg(help_fg)),
                 Span::styled(" g", Style::default().fg(key_color).add_modifier(Modifier::BOLD)),
                 Span::styled(" Open GUI |", Style::default().fg(help_fg)),
-                Span::styled(" q/Esc", Style::default().fg(key_color).add_modifier(Modifier::BOLD)),
+                Span::styled(" q", Style::default().fg(key_color).add_modifier(Modifier::BOLD)),
                 Span::styled(" Quit", Style::default().fg(help_fg)),
             ];
             let help_line = Line::from(help_spans);
@@ -2465,7 +2687,7 @@ impl AppState {
             f.render_widget(Paragraph::new(media_lines).block(block), area);
         } else if self.file_content.is_some() {
             let inner = block.inner(area);
-            let text = self.file_content.clone().unwrap();
+            let text = self.content_for_display();
             let paragraph = Paragraph::new(text.clone())
                 .block(block)
                 .scroll((self.scroll_offset as u16, 0))
@@ -2649,7 +2871,11 @@ impl AppState {
             ]),
             Line::from(vec![
                 Span::styled("    /               : ", Style::default().fg(text_secondary_color)),
-                Span::styled("Search current folder", Style::default().fg(text_primary_color))
+                Span::styled("Search current folder (Folders) / Find in file (Viewer)", Style::default().fg(text_primary_color))
+            ]),
+            Line::from(vec![
+                Span::styled("    n / p           : ", Style::default().fg(text_secondary_color)),
+                Span::styled("Next / previous match, after a Viewer find (Viewer)", Style::default().fg(text_primary_color))
             ]),
             Line::from(vec![
                 Span::styled("    e               : ", Style::default().fg(text_secondary_color)),
@@ -2672,7 +2898,7 @@ impl AppState {
                 Span::styled("Cycle fullscreen reading modes: normal/margins/no margins (Viewer; Esc to exit)", Style::default().fg(text_primary_color))
             ]),
             Line::from(vec![
-                Span::styled("    Ctrl-q          : ", Style::default().fg(text_secondary_color)),
+                Span::styled("    q / Ctrl-q      : ", Style::default().fg(text_secondary_color)),
                 Span::styled("Quit application", Style::default().fg(text_primary_color))
             ]),
         ]
@@ -2810,6 +3036,92 @@ fn rendered_line_for_scroll(text: &Text<'static>, scroll_offset: usize, width: u
         }
     }
     lo.saturating_sub(1).min(n - 1)
+}
+
+/// Case-insensitive substring search returning `(start, end)` byte ranges
+/// into `line_text`. Walks `char_indices` rather than comparing against a
+/// separately-lowercased copy of the string, so every returned offset is
+/// guaranteed to fall on a char boundary of the original string even when
+/// case-folding changes a character's UTF-8 byte length.
+fn find_matches_in_line(line_text: &str, needle: &str) -> Vec<(usize, usize)> {
+    let hay: Vec<(usize, char)> = line_text.char_indices().collect();
+    let pat: Vec<char> = needle.chars().collect();
+    let mut out = Vec::new();
+    if pat.is_empty() || hay.len() < pat.len() {
+        return out;
+    }
+    for start in 0..=hay.len() - pat.len() {
+        let matched = pat
+            .iter()
+            .enumerate()
+            .all(|(k, &pc)| chars_eq_ci(hay[start + k].1, pc));
+        if matched {
+            let byte_start = hay[start].0;
+            let byte_end = hay
+                .get(start + pat.len())
+                .map(|&(idx, _)| idx)
+                .unwrap_or(line_text.len());
+            out.push((byte_start, byte_end));
+        }
+    }
+    out
+}
+
+fn chars_eq_ci(a: char, b: char) -> bool {
+    if a.is_ascii() && b.is_ascii() {
+        a.to_ascii_lowercase() == b.to_ascii_lowercase()
+    } else {
+        a == b || a.to_lowercase().eq(b.to_lowercase())
+    }
+}
+
+/// Overlays search-match highlighting onto a rendered line, splitting its
+/// spans at the match boundaries while preserving each segment's original
+/// foreground color/modifiers (only the background changes). `ranges` is
+/// `(start, end, is_current_match)`, sorted ascending and non-overlapping.
+fn highlight_line(
+    line: &Line<'static>,
+    ranges: &[(usize, usize, bool)],
+    match_bg: Color,
+    current_bg: Color,
+    current_fg: Color,
+) -> Line<'static> {
+    let mut new_spans = Vec::new();
+    let mut offset = 0usize;
+    for span in &line.spans {
+        let span_text: &str = span.content.as_ref();
+        let span_start = offset;
+        let span_end = offset + span_text.len();
+        let mut cursor = span_start;
+        for &(rs, re, is_current) in ranges {
+            if re <= span_start || rs >= span_end {
+                continue;
+            }
+            let seg_start = rs.max(span_start);
+            let seg_end = re.min(span_end);
+            if seg_start > cursor {
+                new_spans.push(Span::styled(
+                    span_text[cursor - span_start..seg_start - span_start].to_string(),
+                    span.style,
+                ));
+            }
+            let style = if is_current {
+                span.style.bg(current_bg).fg(current_fg)
+            } else {
+                span.style.bg(match_bg)
+            };
+            new_spans.push(Span::styled(
+                span_text[seg_start - span_start..seg_end - span_start].to_string(),
+                style,
+            ));
+            cursor = seg_end.max(cursor);
+        }
+        if cursor < span_end {
+            new_spans.push(Span::styled(span_text[cursor - span_start..].to_string(), span.style));
+        }
+        offset = span_end;
+    }
+    Line::from(new_spans)
 }
 
 pub fn is_media_file(path: &str) -> bool {
