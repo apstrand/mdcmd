@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "mdcmd-github-oauth",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-01-01",
+  "observability": { "enabled": true },
+  "vars": {
+    // The origin of the deployed web app, echoed back as the CORS
+    // Access-Control-Allow-Origin. Override per-environment as needed.
+    "ALLOWED_ORIGIN": "http://localhost:1420"
+  }
+  // Secrets (do NOT put these here — set them with `wrangler secret put`):
+  //   GITHUB_CLIENT_ID
+  //   GITHUB_CLIENT_SECRET
+}

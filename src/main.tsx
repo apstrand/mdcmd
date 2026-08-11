@@ -1,7 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
-import DropboxConnect from "./components/DropboxConnect";
+import ConnectGate from "./components/ConnectGate";
 import ErrorBoundary from "./components/ErrorBoundary";
 import "./index.css";
 
@@ -19,9 +19,9 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
         </div>
       )}
       <div style={{ flexGrow: 1, position: "relative", minHeight: 0, display: "flex", flexDirection: "column" }}>
-        <DropboxConnect>
+        <ConnectGate>
           <App />
-        </DropboxConnect>
+        </ConnectGate>
       </div>
     </ErrorBoundary>
   </React.StrictMode>,

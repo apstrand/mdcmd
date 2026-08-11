@@ -43,6 +43,7 @@ function redirectUri(): string {
 }
 
 class DropboxAuth {
+  readonly id = "dropbox" as const;
   private token: StoredToken | null = null;
 
   constructor() {

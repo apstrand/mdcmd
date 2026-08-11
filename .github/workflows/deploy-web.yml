@@ -8,8 +8,10 @@ name: Deploy Web
 #   DEPLOY_PATH           - target folder on the server (e.g. /var/www/mdcmd)
 #   DEPLOY_SSH_KEY        - private SSH key authorized for DEPLOY_USER@DEPLOY_HOST
 #   VITE_DROPBOX_APP_KEY  - Dropbox app key baked into the build (PKCE, no secret)
-# Optional secret:
-#   DEPLOY_PORT           - SSH port (defaults to 22)
+# Optional secrets:
+#   DEPLOY_PORT              - SSH port (defaults to 22)
+#   VITE_GITHUB_CLIENT_ID    - GitHub OAuth App client id (enables GitHub connect)
+#   VITE_GITHUB_OAUTH_PROXY  - URL of the token-exchange proxy worker
 
 on:
   push:
@@ -50,6 +52,8 @@ jobs:
         run: npm run build:web
         env:
           VITE_DROPBOX_APP_KEY: ${{ secrets.VITE_DROPBOX_APP_KEY }}
+          VITE_GITHUB_CLIENT_ID: ${{ secrets.VITE_GITHUB_CLIENT_ID }}
+          VITE_GITHUB_OAUTH_PROXY: ${{ secrets.VITE_GITHUB_OAUTH_PROXY }}
 
       - name: Configure SSH
         env:

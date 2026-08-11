@@ -69,12 +69,18 @@ The compiled release executable will be available at:
 
 ---
 
-## Web Build (static site / PWA with Dropbox)
+## Web Build (static site / PWA with Dropbox or GitHub)
 
 The same frontend can be built as a static, installable website (PWA) that stores
-files in Dropbox instead of the local disk. Filesystem access is abstracted behind
-`src/storage/`: the desktop build uses the Tauri commands, and the web build uses the
-Dropbox HTTP API. The terminal and auto-updater are automatically hidden on the web.
+files in the cloud instead of the local disk. Filesystem access is abstracted behind
+`src/storage/`: the desktop build uses the Tauri commands, and the web build talks to
+a cloud provider — **Dropbox** and/or **GitHub**. The connect screen offers whichever
+providers are configured; you can enable one or both. The terminal and auto-updater
+are automatically hidden on the web.
+
+When connected to GitHub, your repositories appear as the top-level tree
+(`/owner` → `/owner/repo` → files); edits are committed to each repo's default
+branch via the GitHub contents API.
 
 ### 1. Configure a Dropbox app
 
@@ -90,6 +96,23 @@ Dropbox HTTP API. The terminal and auto-updater are automatically hidden on the 
    ```
 
 Authentication uses OAuth 2 with PKCE, so no client secret is required or embedded.
+
+### 1b. (Optional) Configure GitHub
+
+GitHub's token exchange needs the OAuth client secret, which can't live in static
+frontend code, so it runs through a small serverless proxy.
+
+1. Create an **OAuth App** at <https://github.com/settings/developers>. Set the
+   **Authorization callback URL** to your site's URL (add `http://localhost:1420/`
+   for local preview). Note the **Client ID** and generate a **Client secret**.
+2. Deploy the token-exchange proxy in [`server/github-oauth-worker/`](server/github-oauth-worker/)
+   (a Cloudflare Worker reference implementation — see its README; it can be hosted
+   anywhere). Give it the client id/secret.
+3. Set in `.env`:
+   ```bash
+   VITE_GITHUB_CLIENT_ID=<your OAuth App client id>
+   VITE_GITHUB_OAUTH_PROXY=<the deployed proxy URL>
+   ```
 
 ### 2. Build and preview
 

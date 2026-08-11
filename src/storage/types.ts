@@ -31,8 +31,31 @@ export interface PickedFolder {
   name: string;
 }
 
+/**
+ * An authentication provider for a web backend (Dropbox, GitHub). Both use a
+ * full-page OAuth redirect, so the flow is: `login()` navigates away, and on
+ * return `handleRedirectCallback()` completes the exchange. Only meaningful for
+ * backends whose `capabilities.requiresAuth` is true.
+ */
+export interface AuthProvider {
+  readonly id: "dropbox" | "github";
+  /** Whether the required build-time config (app key / client id) is present. */
+  readonly isConfigured: boolean;
+  /** Whether a usable token is currently stored. */
+  readonly isAuthenticated: boolean;
+  /** Begin the login flow by redirecting to the provider's consent screen. */
+  login(): Promise<void>;
+  /**
+   * If the current URL is this provider's OAuth redirect, complete the token
+   * exchange. Returns true if a login was completed. Safe to call on load.
+   */
+  handleRedirectCallback(): Promise<boolean>;
+  /** Forget the stored token. */
+  logout(): void;
+}
+
 export interface StorageBackend {
-  readonly id: "tauri" | "dropbox";
+  readonly id: "tauri" | "dropbox" | "github";
   readonly capabilities: StorageCapabilities;
 
   /** Root/starting directory to show on first load. */
