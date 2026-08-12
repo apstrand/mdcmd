@@ -2,6 +2,13 @@ import { useEffect, useState, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { storage } from "../storage";
 import {
+  connectedProviders,
+  connectableProviders,
+  connectProvider,
+  disconnectProvider,
+  type WebProviderId,
+} from "../storage/web";
+import {
   Folder,
   FileText,
   ChevronLeft,
@@ -17,6 +24,7 @@ import {
   FilePlus,
   FolderPlus,
   MoreVertical,
+  Plus,
 } from "lucide-react";
 
 interface FileEntry {
@@ -559,6 +567,20 @@ export default function FileBrowser({
     storage.releaseFolder?.(path).catch((err) =>
       console.error("Failed to release folder:", err)
     );
+  };
+
+  // The web build's composite root ("/") lists connected cloud providers as
+  // roots; that's where accounts are connected and disconnected.
+  const isWebRoot = storage.id === "web" && (currentPath === "/" || currentPath === "");
+
+  // Disconnect a cloud provider from the root view: forget its token, leave any
+  // folder we were browsing inside it, drop its pinned workspaces, and refresh.
+  const handleDisconnect = (id: WebProviderId, label: string) => {
+    if (!window.confirm(`Disconnect ${label}? You can reconnect at any time.`)) return;
+    disconnectProvider(id);
+    setPinnedWorkspaces(pinnedWorkspaces.filter((p) => !p.path.startsWith(`/${id}`)));
+    if (currentPath.startsWith(`/${id}`)) setCurrentPath("/");
+    setReloadToken((t) => t + 1);
   };
 
   // Pick a folder via the native document picker (iOS) and pin it as a
@@ -1207,7 +1229,64 @@ export default function FileBrowser({
             </div>
           )}
 
-          {!loading && !error && !searchQuery && viewMode === "list" && (
+          {/* Web build: the composite root lists connected cloud providers, each
+              a browsable root with a disconnect button, plus rows to connect more. */}
+          {!loading && !error && !searchQuery && isWebRoot && (
+            <div className="file-list">
+              {connectedProviders().map((p) => (
+                <div
+                  key={p.id}
+                  className="file-item"
+                  onClick={() => setCurrentPath(`/${p.id}`)}
+                  style={{ cursor: "pointer" }}
+                >
+                  <span className="file-item-icon">
+                    <Folder style={{ width: "16px", height: "16px", color: "var(--text-secondary)", opacity: 0.8 }} />
+                  </span>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flexGrow: 1, fontWeight: 500 }}>
+                    {p.label}
+                  </span>
+                  <div className="file-item-actions">
+                    <button
+                      className="file-action-btn"
+                      tabIndex={-1}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDisconnect(p.id, p.label);
+                      }}
+                      title={`Disconnect ${p.label}`}
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {connectableProviders().map((c) => (
+                <div
+                  key={c.id}
+                  className="file-item"
+                  onClick={() => connectProvider(c.id).catch((err) => setError(String(err)))}
+                  style={{ cursor: "pointer", opacity: 0.85 }}
+                  title={`Connect ${c.label}`}
+                >
+                  <span className="file-item-icon">
+                    <Plus style={{ width: "16px", height: "16px" }} />
+                  </span>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flexGrow: 1 }}>
+                    Connect {c.label}
+                  </span>
+                </div>
+              ))}
+              {connectedProviders().length === 0 && connectableProviders().length === 0 && (
+                <div style={{ padding: "16px", textAlign: "center", fontSize: "12px", color: "var(--text-secondary)" }}>
+                  No cloud providers are configured. See the README to enable Dropbox or GitHub.
+                </div>
+              )}
+            </div>
+          )}
+
+          {!loading && !error && !searchQuery && !isWebRoot && viewMode === "list" && (
             <div className="file-list">
               {entries.length === 0 ? (
                 <div style={{ padding: "16px", textAlign: "center", fontSize: "12px", color: "var(--text-secondary)" }}>
@@ -1291,7 +1370,7 @@ export default function FileBrowser({
             </div>
           )}
 
-          {!loading && !error && !searchQuery && viewMode === "tree" && (
+          {!loading && !error && !searchQuery && !isWebRoot && viewMode === "tree" && (
             <div className="file-list">
               {flatNodes.length === 0 ? (
                 <div style={{ padding: "16px", textAlign: "center", fontSize: "12px", color: "var(--text-secondary)" }}>

@@ -55,7 +55,7 @@ export interface AuthProvider {
 }
 
 export interface StorageBackend {
-  readonly id: "tauri" | "dropbox" | "github";
+  readonly id: "tauri" | "dropbox" | "github" | "web";
   readonly capabilities: StorageCapabilities;
 
   /** Root/starting directory to show on first load. */
