@@ -19,10 +19,25 @@ export default function ConnectGate({ children }: { children: React.ReactNode })
       .finally(() => setReady(true));
   }, [isWeb]);
 
+  // Promo banner for the web build's landing screen only — shown here (rather
+  // than around the whole app in main.tsx) so it disappears once connected
+  // instead of covering the app's own header on every screen.
+  const banner = (
+    <div style={{
+      background: "var(--accent)", color: "white", padding: "8px",
+      textAlign: "center", fontSize: "14px", fontWeight: 500, flexShrink: 0
+    }}>
+      Like MarkDown Commander? Check out the <a href="https://github.com/apstrand/mdcmd" style={{ color: "white", textDecoration: "underline" }}>GitHub repo</a> or install the <a href="https://crates.io/crates/mdc" style={{ color: "white", textDecoration: "underline" }}>Rust crate</a>!
+    </div>
+  );
+
   if (!ready) {
     return (
-      <div className="no-file-selected" style={{ height: "100vh" }}>
-        <Loader2 className="w-8 h-8 animate-spin text-accent" />
+      <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+        {banner}
+        <div className="no-file-selected" style={{ flexGrow: 1, minHeight: 0 }}>
+          <Loader2 className="w-8 h-8 animate-spin text-accent" />
+        </div>
       </div>
     );
   }
