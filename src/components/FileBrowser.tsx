@@ -520,6 +520,13 @@ export default function FileBrowser({
     }
   };
 
+  // Left-truncating path text (".path-ellipsis-left"/".workspace-item-path")
+  // renders with `direction: rtl` so the ellipsis appears on the left. That
+  // trick reorders bidi-neutral characters at the string's start/end, which
+  // visually moves a leading "/" to the end of the text (looks like a bogus
+  // trailing slash). Stripping it before render avoids that artifact.
+  const rtlTruncate = (path: string) => path.replace(/^[/\\]+/, "");
+
   // Extract folder name from absolute path
   const getFolderName = (path: string) => {
     const isWindows = path.includes("\\");
@@ -1080,7 +1087,7 @@ export default function FileBrowser({
               </button>
               <div className="path-bar" title={currentPath}>
                 <span className="path-ellipsis-left">
-                  {displayPath(currentPath) || "Loading path..."}
+                  {rtlTruncate(displayPath(currentPath)) || "Loading path..."}
                 </span>
               </div>
             </div>
@@ -1090,7 +1097,7 @@ export default function FileBrowser({
             <div style={{ display: "flex", gap: "6px", marginBottom: "8px", alignItems: "center" }}>
               <div className="path-bar" title={treeRootPath} style={{ flexGrow: 1, fontSize: "11px", opacity: 0.8 }}>
                 <span style={{ flexShrink: 0 }}>🌳</span>
-                <span className="path-ellipsis-left">{displayPath(treeRootPath)}</span>
+                <span className="path-ellipsis-left">{rtlTruncate(displayPath(treeRootPath))}</span>
               </div>
             </div>
           )}
@@ -1531,7 +1538,7 @@ export default function FileBrowser({
                       )}
                       <div className="workspace-item-text">
                         <span className="workspace-item-name">{getFolderName(item.path)}</span>
-                        <span className="workspace-item-path">{item.path}</span>
+                        <span className="workspace-item-path">{rtlTruncate(item.path)}</span>
                       </div>
                     </div>
                     <div className="workspace-item-actions">
