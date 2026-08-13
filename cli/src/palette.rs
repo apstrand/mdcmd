@@ -1,5 +1,4 @@
 use ratatui::style::Color;
-use std::time::Duration;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Palette {
@@ -21,8 +20,10 @@ pub struct Palette {
 }
 
 impl Palette {
-    pub fn detect() -> Self {
-        if is_light_mode() {
+    /// `bg_rgb` is the terminal's background color as reported over OSC 11,
+    /// if the caller already queried it (see [`is_light_mode`]).
+    pub fn detect(bg_rgb: Option<(u8, u8, u8)>) -> Self {
+        if is_light_mode(bg_rgb) {
             // Light Mode Palette
             Self {
                 bg: Color::Rgb(255, 255, 255),
@@ -65,9 +66,16 @@ impl Palette {
 }
 
 /// Decide between the dark and light palette. Explicit env overrides win first
-/// (useful for testing/CI); otherwise query the host terminal's real background
-/// color via OSC 11, falling back to heuristics for terminals that don't answer.
-pub fn is_light_mode() -> bool {
+/// (useful for testing/CI); otherwise use the host terminal's real background
+/// color, if the caller obtained one via an OSC 11 query, falling back to
+/// heuristics for terminals that don't answer.
+///
+/// `bg_rgb` is threaded in rather than queried here so that it can share a
+/// single stdio round-trip with the image-protocol capability query: issuing
+/// two independent blind reads of stdin back to back is racy over high-latency
+/// links like SSH, where a reply to the first query can arrive late and get
+/// consumed by the second one's parser instead.
+pub fn is_light_mode(bg_rgb: Option<(u8, u8, u8)>) -> bool {
     if std::env::var("MDCMD_LIGHT_MODE").is_ok() {
         return true;
     }
@@ -75,8 +83,10 @@ pub fn is_light_mode() -> bool {
         return false;
     }
 
-    if let Ok(theme) = termbg::theme(Duration::from_millis(100)) {
-        return theme == termbg::Theme::Light;
+    if let Some((r, g, b)) = bg_rgb {
+        // ITU-R BT.601 luma, same weighting termbg used.
+        let y = r as f64 * 0.299 + g as f64 * 0.587 + b as f64 * 0.114;
+        return y > 128.0;
     }
 
     if let Ok(val) = std::env::var("COLORFGBG") {

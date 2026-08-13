@@ -13,6 +13,7 @@ use anyhow::Result;
 mod config;
 mod markdown;
 mod palette;
+mod termquery;
 mod tui;
 
 use tui::AppState;
@@ -27,9 +28,51 @@ ARGS:
     <PATH>    Directory or file to open (defaults to the current directory)
 
 OPTIONS:
-    -g, --gui        Open the file (or current directory) in the MarkDown Commander GUI and exit
-    -h, --help       Print help information
-    -v, --version    Print version information";
+    -g, --gui          Open the file (or current directory) in the MarkDown Commander GUI and exit
+    -h, --help         Print help information
+    -v, --version      Print version information
+        --debug-image  Print detected terminal image-protocol capabilities and exit";
+
+/// Runs the same terminal capability query the TUI uses at startup and prints
+/// the result, without entering the alternate screen. Useful for diagnosing
+/// why inline images fall back to halfblocks in a given terminal/session
+/// (e.g. over SSH) without having to read escape-sequence output by eye.
+fn debug_image() {
+    for (name, val) in [
+        "TERM",
+        "TERM_PROGRAM",
+        "WEZTERM_EXECUTABLE",
+        "KONSOLE_VERSION",
+        "SSH_TTY",
+        "SSH_CONNECTION",
+    ]
+    .map(|name| (name, std::env::var(name)))
+    {
+        println!("{name}={val:?}");
+    }
+
+    let raw_was_enabled = enable_raw_mode().is_ok();
+    let picker = ratatui_image::picker::Picker::from_query_stdio_with_options(
+        ratatui_image::picker::cap_parser::QueryStdioOptions {
+            terminal_background_color_osc: true,
+            ..Default::default()
+        },
+    );
+    if raw_was_enabled {
+        let _ = disable_raw_mode();
+    }
+
+    match picker {
+        Ok(p) => {
+            println!("protocol_type={:?}", p.protocol_type());
+            println!("font_size={:?}", p.font_size());
+            println!("capabilities={:?}", p.capabilities());
+        }
+        Err(e) => println!("query failed: {e:?}"),
+    }
+
+    println!("xtversion_is_wezterm={:?}", termquery::is_wezterm());
+}
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -43,6 +86,10 @@ fn main() -> Result<()> {
             }
             "-v" | "--version" => {
                 println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+                return Ok(());
+            }
+            "--debug-image" => {
+                debug_image();
                 return Ok(());
             }
             "-g" | "--gui" => launch_gui = true,
@@ -73,11 +120,6 @@ fn main() -> Result<()> {
         std::env::current_dir().ok()
     };
 
-    // Detect the host terminal's background before switching to the
-    // alternate screen, so the OSC 11 query round-trips against the
-    // terminal's normal buffer.
-    let palette = palette::Palette::detect();
-
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
         let _ = disable_raw_mode();
@@ -92,7 +134,7 @@ fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = AppState::new(initial_path, palette);
+    let mut app = AppState::new(initial_path);
 
     while !app.quit {
         if app.needs_clear {

@@ -167,7 +167,7 @@ pub struct AppState {
 
 
 impl AppState {
-    pub fn new(initial_path: Option<PathBuf>, palette: Palette) -> Self {
+    pub fn new(initial_path: Option<PathBuf>) -> Self {
         let config = Config::load();
         
         let start_path = initial_path
@@ -186,11 +186,41 @@ impl AppState {
         };
 
         let view_mode = config.view_mode;
-        // Queries the terminal for graphics-protocol support (Kitty/Sixel/iTerm2) and cell
-        // pixel size; falls back to a halfblocks approximation when the terminal doesn't
-        // answer (e.g. it isn't a real TTY, or doesn't support any image protocol).
-        let image_picker = ratatui_image::picker::Picker::from_query_stdio()
-            .unwrap_or_else(|_| ratatui_image::picker::Picker::halfblocks());
+        // Queries the terminal for graphics-protocol support (Kitty/Sixel/iTerm2), cell
+        // pixel size, and background color (OSC 11) in a single stdio round-trip; falls
+        // back to a halfblocks approximation when the terminal doesn't answer (e.g. it
+        // isn't a real TTY, or doesn't support any image protocol). Bundling the
+        // background-color query here rather than issuing it separately avoids a race
+        // where a slow reply (e.g. over SSH) arrives after its own query gave up and gets
+        // consumed by this one's parser instead, which was breaking image-protocol
+        // detection over SSH.
+        let mut image_picker = ratatui_image::picker::Picker::from_query_stdio_with_options(
+            ratatui_image::picker::cap_parser::QueryStdioOptions {
+                terminal_background_color_osc: true,
+                ..Default::default()
+            },
+        )
+        .unwrap_or_else(|_| ratatui_image::picker::Picker::halfblocks());
+        // WezTerm's Kitty support has gaps in "virtual placement" (the unicode-placeholder
+        // mode ratatui-image's Kitty renderer relies on) that only show up once the bytes
+        // are relayed through SSH rather than written straight into a locally-attached
+        // pty. ratatui-image already knows to prefer the (more reliable, here) iTerm2
+        // protocol for WezTerm, but only detects it via WEZTERM_EXECUTABLE/TERM_PROGRAM,
+        // which don't survive into a remote shell. Cross-check with a live terminal query
+        // (transport-agnostic) and override when they disagree.
+        if image_picker.protocol_type() == ratatui_image::picker::ProtocolType::Kitty
+            && crate::termquery::is_wezterm()
+        {
+            image_picker.set_protocol_type(ratatui_image::picker::ProtocolType::Iterm2);
+        }
+        let bg_rgb = image_picker.capabilities().iter().find_map(|cap| {
+            if let ratatui_image::picker::Capability::Background(r, g, b) = cap {
+                Some((*r, *g, *b))
+            } else {
+                None
+            }
+        });
+        let palette = Palette::detect(bg_rgb);
         let mut app = Self {
             config,
             current_dir,
