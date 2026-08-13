@@ -644,13 +644,17 @@ export default function MarkdownEditor({
     handleFindPrevRef.current = handleFindPrev;
   });
 
-  // Keyboard shortcut Ctrl+S / Cmd+S for saving, Cmd+F for find, Cmd+G for find next, Cmd+Shift+G for find prev
+  // Keyboard shortcut Ctrl+S / Cmd+S for saving, Cmd+F for find, Cmd+G for find next, Cmd+Shift+G for find prev,
+  // Cmd+` to toggle between rich text and plain text editing.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const isCmd = e.metaKey || e.ctrlKey;
       const key = e.key.toLowerCase();
-      
-      if (isCmd && key === "s") {
+
+      if (e.metaKey && (e.key === "`" || e.code === "Backquote")) {
+        e.preventDefault();
+        handleToggleMode(editMode === "rich" ? "plain" : "rich");
+      } else if (isCmd && key === "s") {
         e.preventDefault();
         handleSaveRef.current();
       } else if (isCmd && key === "f") {
@@ -685,7 +689,7 @@ export default function MarkdownEditor({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [editMode, editor]);
 
   // Keyboard zoom: Cmd/Ctrl with '+'/'=' zooms in, '-' out, '0' resets.
   useEffect(() => {
