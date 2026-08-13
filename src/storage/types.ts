@@ -86,4 +86,13 @@ export interface StorageBackend {
   restoreAccess?(): Promise<string[]>;
   /** Release access to (and forget) a previously-picked folder (on unpin). */
   releaseFolder?(path: string): Promise<void>;
+
+  /**
+   * The file the iOS Home Screen "Quick Note" widget jumps into (`null` if
+   * unset). Only meaningful on the Tauri backend, which persists it in the
+   * shared config file alongside the pinned workspaces.
+   */
+  readQuickNoteTarget?(): Promise<string | null>;
+  /** Set (or, with `null`, clear) the Quick Note widget's target file. */
+  writeQuickNoteTarget?(path: string | null): Promise<void>;
 }

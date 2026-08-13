@@ -40,6 +40,12 @@ export default function App() {
   // instead of shifting anything, unlike the old inline "Saved" label that
   // used to live in the editor's save-status row).
   const [justSaved, setJustSaved] = useState(false);
+  // One-shot signal: the file the "Quick Note" widget most recently jumped
+  // to, so MarkdownEditor can move the cursor to the end and focus it once
+  // the file finishes loading. MarkdownEditor clears it back to null (via
+  // onFocusAtEndHandled) right after consuming it, so reopening the same
+  // file later through normal navigation doesn't re-trigger the jump.
+  const [quickNoteFocusPath, setQuickNoteFocusPath] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [draggedTab, setDraggedTab] = useState<string | null>(null);
 
@@ -385,6 +391,43 @@ export default function App() {
       })
       .catch(() => {});
     invoke<string[]>("drain_opened_files").then(openFirst).catch(() => {});
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
+  // Jump into the configured Quick Note target when the iOS Home Screen
+  // widget is tapped (delivered the same way as opened files: buffered for a
+  // cold-launch drain, and emitted live while the app is already running).
+  const openQuickNoteRef = useRef<() => void>(() => {});
+  openQuickNoteRef.current = () => {
+    storage.readQuickNoteTarget?.()
+      .then((target) => {
+        if (!target) return;
+        handleSelectFileRef.current(target);
+        setQuickNoteFocusPath(target);
+      })
+      .catch(() => {});
+  };
+  useEffect(() => {
+    if (storage.id !== "tauri") return;
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    import("@tauri-apps/api/event")
+      .then(({ listen }) =>
+        listen("quick-note-requested", () => openQuickNoteRef.current()),
+      )
+      .then((u) => {
+        if (cancelled) u();
+        else unlisten = u;
+      })
+      .catch(() => {});
+    invoke<number>("drain_quick_note_request")
+      .then((count) => {
+        if (count > 0) openQuickNoteRef.current();
+      })
+      .catch(() => {});
     return () => {
       cancelled = true;
       unlisten?.();
@@ -926,6 +969,8 @@ export default function App() {
                 onSave={handleSaveFile}
                 onChange={handleContentChange}
                 onOpenFile={handleSelectFile}
+                focusAtEndFor={quickNoteFocusPath}
+                onFocusAtEndHandled={() => setQuickNoteFocusPath(null)}
                 isPinned={pinnedShortcuts.some((p) => p.path === selectedFile)}
                 onTogglePin={() => {
                   setPinnedShortcuts(

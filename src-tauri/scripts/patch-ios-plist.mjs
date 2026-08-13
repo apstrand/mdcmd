@@ -39,6 +39,7 @@ const add = (entry, type, value) => {
 del("CFBundleDocumentTypes");
 del("UTImportedTypeDeclarations");
 del("LSSupportsOpeningDocumentsInPlace");
+del("CFBundleURLTypes");
 
 // Open documents in place (edit the original file). The docpicker plugin
 // swizzles application(open:) to start the security scope so the in-place URL
@@ -67,5 +68,15 @@ add("UTImportedTypeDeclarations:0:UTTypeTagSpecification:public.filename-extensi
 ["md", "markdown", "mdown", "qmd"].forEach((ext, i) =>
   add(`UTImportedTypeDeclarations:0:UTTypeTagSpecification:public.filename-extension:${i}`, "string", ext),
 );
+
+// Register the "mdcmd" custom URL scheme so mdcmd://quick-note (opened by the
+// Home Screen "Quick Note" widget's Link) launches/foregrounds the app. It
+// arrives via the same RunEvent::Opened path as opened files (Rust side
+// distinguishes it by scheme).
+add("CFBundleURLTypes", "array");
+add("CFBundleURLTypes:0", "dict");
+add("CFBundleURLTypes:0:CFBundleURLName", "string", "com.mdcmd");
+add("CFBundleURLTypes:0:CFBundleURLSchemes", "array");
+add("CFBundleURLTypes:0:CFBundleURLSchemes:0", "string", "mdcmd");
 
 console.log("[patch-ios-plist] applied Markdown document types to", plist);

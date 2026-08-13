@@ -27,6 +27,7 @@ import {
   FolderPlus,
   MoreVertical,
   Plus,
+  Zap,
 } from "lucide-react";
 
 interface FileEntry {
@@ -144,6 +145,20 @@ export default function FileBrowser({
       .then(setVersionInfo)
       .catch(() => {});
   }, []);
+
+  // The file the iOS Home Screen "Quick Note" widget jumps into (iOS only).
+  const [quickNoteTarget, setQuickNoteTarget] = useState<string | null>(null);
+  useEffect(() => {
+    storage.readQuickNoteTarget?.()
+      .then((path) => setQuickNoteTarget(path))
+      .catch(() => {});
+  }, []);
+
+  const toggleQuickNoteTarget = (path: string) => {
+    const next = quickNoteTarget === path ? null : path;
+    setQuickNoteTarget(next);
+    storage.writeQuickNoteTarget?.(next).catch((err) => setError(String(err)));
+  };
 
   // Focus sidebar on mount
   useEffect(() => {
@@ -1640,6 +1655,27 @@ export default function FileBrowser({
                       </div>
                     </div>
                     <div className="shortcut-item-actions">
+                      {!item.isDir && storage.writeQuickNoteTarget && (
+                        <button
+                          className={`shortcut-action-btn quick-note-btn ${quickNoteTarget === item.path ? "pinned" : ""}`}
+                          tabIndex={-1}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleQuickNoteTarget(item.path);
+                            sidebarRef.current?.focus();
+                          }}
+                          title={
+                            quickNoteTarget === item.path
+                              ? "Unset Quick Note Target"
+                              : "Set as Quick Note Target"
+                          }
+                        >
+                          <Zap
+                            className={`w-3.5 h-3.5 ${quickNoteTarget === item.path ? "text-accent" : ""}`}
+                          />
+                        </button>
+                      )}
                       <button
                         className="shortcut-action-btn"
                         tabIndex={-1}

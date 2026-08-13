@@ -41,4 +41,10 @@ export const tauriBackend: StorageBackend = {
   async getMediaUrl(path: string) {
     return convertFileSrc(path);
   },
+  readQuickNoteTarget() {
+    return invoke<string | null>("read_quick_note_target");
+  },
+  writeQuickNoteTarget(path: string | null) {
+    return invoke("write_quick_note_target", { path }).then(() => undefined);
+  },
 };

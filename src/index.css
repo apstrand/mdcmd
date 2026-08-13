@@ -402,6 +402,15 @@ body {
   color: hsl(0, 84%, 60%);
 }
 
+.shortcut-action-btn.quick-note-btn:hover {
+  color: var(--accent);
+}
+
+.shortcut-action-btn.pinned {
+  color: var(--accent);
+  opacity: 1;
+}
+
 /* File Browser Items */
 .path-bar {
   display: flex;

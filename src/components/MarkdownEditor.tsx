@@ -201,6 +201,11 @@ interface MarkdownEditorProps {
   isPinned?: boolean;
   onTogglePin?: () => void;
   isDirty?: boolean;
+  /** When this equals `filePath`, move the cursor to the end and focus the
+   *  editor (the iOS Quick Note widget jumping straight into typing). */
+  focusAtEndFor?: string | null;
+  /** Called right after consuming a matching `focusAtEndFor`. */
+  onFocusAtEndHandled?: () => void;
 }
 
 export default function MarkdownEditor({
@@ -212,6 +217,8 @@ export default function MarkdownEditor({
   onOpenFile,
   isPinned,
   onTogglePin,
+  focusAtEndFor,
+  onFocusAtEndHandled,
   isDirty,
 }: MarkdownEditorProps) {
   const [isSaving, setIsSaving] = useState(false);
@@ -391,10 +398,22 @@ export default function MarkdownEditor({
 
   // Restore the saved scroll position for the rich editor once it is ready.
   // No saved value means "never opened before" -> stay at the top (0).
+  // Exception: the Quick Note widget wants the cursor at the *end*, ready to
+  // type a new line, instead of wherever the file was last scrolled to.
   useEffect(() => {
     if (!editor || editMode !== "rich") return;
     const el = editorContainerRef.current;
     if (!el) return;
+
+    if (focusAtEndFor === filePath) {
+      requestAnimationFrame(() => {
+        editor.commands.setTextSelection(editor.state.doc.content.size);
+        editor.commands.focus(undefined, { scrollIntoView: true });
+        onFocusAtEndHandled?.();
+      });
+      return;
+    }
+
     const saved = readSavedScroll();
     latestScrollRef.current = saved;
     // Two frames: the first lets ProseMirror lay out the content, the second
@@ -415,11 +434,24 @@ export default function MarkdownEditor({
   }, [editor]);
 
   // Restore the saved scroll position for the plain-text / non-markdown view.
+  // Same Quick Note exception as the rich-editor effect above.
   useEffect(() => {
     const usesTextarea = !isMarkdown || editMode === "plain";
     if (!usesTextarea) return;
     const el = plainTextareaRef.current;
     if (!el) return;
+
+    if (focusAtEndFor === filePath) {
+      requestAnimationFrame(() => {
+        const end = el.value.length;
+        el.setSelectionRange(end, end);
+        el.focus();
+        el.scrollTop = el.scrollHeight;
+        onFocusAtEndHandled?.();
+      });
+      return;
+    }
+
     const saved = readSavedScroll();
     latestScrollRef.current = saved;
     const raf = requestAnimationFrame(() => {

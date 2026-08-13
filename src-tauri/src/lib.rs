@@ -235,6 +235,59 @@ fn write_workspaces(workspaces: Vec<PinnedItem>) -> Result<(), String> {
     std::fs::write(&path, content).map_err(|e| e.to_string())
 }
 
+/// Read the path of the file the iOS Home Screen "Quick Note" widget should
+/// jump into, from the same shared config file as the pinned workspaces.
+#[tauri::command]
+fn read_quick_note_target() -> Result<Option<String>, String> {
+    let path = match config_file_path() {
+        Some(p) => p,
+        None => return Ok(None),
+    };
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let json: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+    Ok(json
+        .get("quick_note_target")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string()))
+}
+
+/// Write (or clear, when `path` is `None`) the Quick Note widget's target
+/// file, preserving any other fields already stored in the config file.
+#[tauri::command]
+fn write_quick_note_target(path: Option<String>) -> Result<(), String> {
+    let config_path =
+        config_file_path().ok_or_else(|| "Could not determine config directory".to_string())?;
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+
+    let mut json = if config_path.exists() {
+        std::fs::read_to_string(&config_path)
+            .ok()
+            .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+            .unwrap_or_else(|| serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+    if !json.is_object() {
+        json = serde_json::json!({});
+    }
+
+    match path {
+        Some(p) => json["quick_note_target"] = serde_json::Value::String(p),
+        None => {
+            if let Some(obj) = json.as_object_mut() {
+                obj.remove("quick_note_target");
+            }
+        }
+    }
+    let content = serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?;
+    std::fs::write(&config_path, content).map_err(|e| e.to_string())
+}
+
 #[cfg(desktop)]
 #[tauri::command]
 fn open_terminal(path: String) -> Result<(), String> {
@@ -588,6 +641,19 @@ fn drain_opened_files(state: tauri::State<'_, OpenedFiles>) -> Vec<String> {
     std::mem::take(&mut *files)
 }
 
+/// Taps on the iOS Home Screen "Quick Note" widget (which opens the
+/// `mdcmd://quick-note` URL, delivered the same way as opened files via
+/// `RunEvent::Opened`). A counter rather than a flag so repeated taps while
+/// the app is already foregrounded aren't lost.
+#[derive(Default)]
+struct QuickNoteRequests(std::sync::Mutex<u32>);
+
+#[tauri::command]
+fn drain_quick_note_request(state: tauri::State<'_, QuickNoteRequests>) -> u32 {
+    let mut count = state.0.lock().unwrap();
+    std::mem::take(&mut *count)
+}
+
 // Build the desktop menu. This mirrors Tauri's default menu but rebinds the
 // "Close Window" item to Cmd/Ctrl+Shift+W, leaving plain Cmd/Ctrl+W free for
 // the in-app "close tab" shortcut handled by the frontend.
@@ -654,6 +720,7 @@ pub fn run() {
 
     let builder = tauri::Builder::default()
         .manage(OpenedFiles(std::sync::Mutex::new(initial_files)))
+        .manage(QuickNoteRequests::default())
         .plugin(tauri_plugin_opener::init());
 
     // Desktop registers the terminal/window-state/updater plugins and commands.
@@ -684,6 +751,8 @@ pub fn run() {
             create_folder,
             read_workspaces,
             write_workspaces,
+            read_quick_note_target,
+            write_quick_note_target,
             open_terminal,
             open_new_window,
             search_directory,
@@ -694,6 +763,7 @@ pub fn run() {
             check_for_updates,
             download_and_install_update,
             drain_opened_files,
+            drain_quick_note_request,
             app_version_info
         ]);
 
@@ -714,8 +784,11 @@ pub fn run() {
         create_folder,
         read_workspaces,
         write_workspaces,
+        read_quick_note_target,
+        write_quick_note_target,
         search_directory,
         drain_opened_files,
+        drain_quick_note_request,
         app_version_info
     ]);
 
@@ -740,6 +813,15 @@ pub fn run() {
                         state.0.lock().unwrap().extend(paths.iter().cloned());
                     }
                     let _ = app_handle.emit("files-opened", paths);
+                }
+
+                // The iOS Home Screen "Quick Note" widget deep-links in via
+                // `mdcmd://quick-note`, delivered the same way as opened files.
+                if urls.iter().any(|u| u.scheme() == "mdcmd") {
+                    if let Some(state) = app_handle.try_state::<QuickNoteRequests>() {
+                        *state.0.lock().unwrap() += 1;
+                    }
+                    let _ = app_handle.emit("quick-note-requested", ());
                 }
             }
 
