@@ -31,6 +31,8 @@ echo "============================================="
 echo " Bumping release version to $NEW_VERSION"
 echo "============================================="
 
+export NEW_VERSION
+
 # 1. package.json (+ package-lock.json), via npm so both stay consistent.
 echo "-> package.json"
 npm version "$NEW_VERSION" --no-git-tag-version --allow-same-version >/dev/null
@@ -38,7 +40,7 @@ npm version "$NEW_VERSION" --no-git-tag-version --allow-same-version >/dev/null
 # 2. cli/Cargo.toml — only the [package] version, not any dependency's
 #    inline version constraint, so replace just the first `version = `.
 echo "-> cli/Cargo.toml"
-sed -i "0,/^version = \".*\"/s//version = \"$NEW_VERSION\"/" cli/Cargo.toml
+perl -i -pe 'if (!$done && /^version = ".*"/) { s/^version = ".*"/version = "$ENV{NEW_VERSION}"/; $done = 1 }' cli/Cargo.toml
 
 # Regenerate cli/Cargo.lock's own "mdc" entry to match. `cargo check` only
 # rewrites the lockfile for the version bump already made to Cargo.toml, it
@@ -49,7 +51,7 @@ echo "-> cli/Cargo.lock"
 # 3. src-tauri/Cargo.toml — same first-`version =` trick as cli. The desktop
 #    GUI's version footer reads this via env!("CARGO_PKG_VERSION").
 echo "-> src-tauri/Cargo.toml"
-sed -i "0,/^version = \".*\"/s//version = \"$NEW_VERSION\"/" src-tauri/Cargo.toml
+perl -i -pe 'if (!$done && /^version = ".*"/) { s/^version = ".*"/version = "$ENV{NEW_VERSION}"/; $done = 1 }' src-tauri/Cargo.toml
 
 echo "-> src-tauri/Cargo.lock"
 (cd src-tauri && cargo check --offline --quiet 2>/dev/null || cargo check --quiet)
@@ -59,7 +61,7 @@ echo "-> src-tauri/Cargo.lock"
 #    actual release tag/commit at build time, so commit: is left alone here
 #    (it would need the bump commit's own hash, which doesn't exist yet).
 echo "-> flatpak/com.mdcmd.App.yml"
-sed -i "s/tag: .*/tag: v$NEW_VERSION/" flatpak/com.mdcmd.App.yml
+perl -i -pe 's/tag: .*/tag: v$ENV{NEW_VERSION}/' flatpak/com.mdcmd.App.yml
 
 echo "============================================="
 echo "Done. Changed files:"
