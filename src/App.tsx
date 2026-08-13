@@ -260,14 +260,21 @@ export default function App() {
     localStorage.setItem("tauri-markdown-view-mode", viewMode);
   }, [viewMode]);
 
+  // Sidebar's max resizable width. The web/Dropbox build defaults to (and can
+  // be resized up to) half the window, since 450px reads as a tiny sliver on
+  // a full browser window — the desktop build keeps the narrower cap since
+  // its window is usually sized to the app already.
+  const maxSidebarWidth = isDesktop ? 450 : Math.max(450, Math.round(window.innerWidth * 0.6));
+
   // Persistent sidebar width state
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
     try {
       const saved = localStorage.getItem("tauri-markdown-sidebar-width");
-      return saved ? parseInt(saved, 10) : 260;
+      if (saved) return parseInt(saved, 10);
     } catch {
-      return 260;
+      // fall through to the default below
     }
+    return isDesktop ? 260 : Math.max(260, Math.round(window.innerWidth / 2));
   });
 
   useEffect(() => {
@@ -278,7 +285,7 @@ export default function App() {
   const startSidebarResize = (mouseDownEvent: React.MouseEvent) => {
     mouseDownEvent.preventDefault();
     const handleMouseMove = (moveEvent: MouseEvent) => {
-      const newWidth = Math.max(180, Math.min(450, moveEvent.clientX));
+      const newWidth = Math.max(180, Math.min(maxSidebarWidth, moveEvent.clientX));
       setSidebarWidth(newWidth);
     };
 
