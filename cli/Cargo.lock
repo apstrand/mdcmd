@@ -1204,6 +1204,7 @@ dependencies = [
  "crossterm 0.29.0",
  "dirs",
  "image",
+ "libc",
  "notify",
  "portable-pty",
  "ratatui",

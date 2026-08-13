@@ -95,6 +95,25 @@ fn debug_image() {
     println!("xtversion_is_wezterm={:?}", termquery::is_wezterm());
 }
 
+/// Tears the terminal down, stops the process with SIGTSTP (the same signal
+/// the kernel would send for Ctrl-Z outside of raw mode), and restores the
+/// terminal once the shell resumes us with SIGCONT. A no-op on non-Unix
+/// platforms, which have no equivalent job-control signal.
+fn suspend(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
+    disable_raw_mode()?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen, Show)?;
+
+    #[cfg(unix)]
+    unsafe {
+        libc::raise(libc::SIGTSTP);
+    }
+
+    enable_raw_mode()?;
+    execute!(terminal.backend_mut(), EnterAlternateScreen, Hide)?;
+    terminal.clear()?;
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
@@ -219,6 +238,11 @@ fn main() -> Result<()> {
             if let Event::Key(key) = event::read()? {
                 if key.kind == event::KeyEventKind::Press {
                     app.handle_key(key)?;
+                    if app.suspend_requested {
+                        app.suspend_requested = false;
+                        suspend(&mut terminal)?;
+                        app.needs_clear = true;
+                    }
                 }
             }
         }

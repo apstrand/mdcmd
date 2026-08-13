@@ -169,6 +169,11 @@ pub struct AppState {
     /// state, flushes, waits briefly, then draws again with it cleared so
     /// only the image's cells actually hit the wire on that second write.
     pub suppress_images_this_frame: bool,
+    /// Set by Ctrl-Z and cleared by `main.rs` once it has torn down the
+    /// terminal, raised SIGTSTP, and set it back up again after the process
+    /// resumes. Raw mode disables the kernel's own SIGTSTP delivery for
+    /// Ctrl-Z, so without this the keypress would just be swallowed.
+    pub suspend_requested: bool,
 }
 
 
@@ -274,6 +279,7 @@ impl AppState {
             watch_rx: None,
             watched_dir: None,
             suppress_images_this_frame: false,
+            suspend_requested: false,
         };
 
         app.reload_directory();
@@ -281,6 +287,7 @@ impl AppState {
         if let Some(file) = initial_file {
             app.select_file(file);
             app.active_section = ActiveSection::Viewer;
+            app.fullscreen = FullscreenMode::Margins;
         }
 
         app
@@ -1086,6 +1093,15 @@ impl AppState {
         // down automatically once the child process exits.
         if self.pty_session.is_some() {
             return self.handle_pty_key(key);
+        }
+
+        // Raw mode disables the terminal's own SIGTSTP delivery, so Ctrl-Z
+        // would otherwise just be swallowed as an ordinary keypress. Ask
+        // `main.rs` (which owns the terminal setup/teardown) to suspend the
+        // process for us instead.
+        if key.code == KeyCode::Char('z') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.suspend_requested = true;
+            return Ok(());
         }
 
         if self.create_active {
