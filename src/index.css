@@ -506,6 +506,13 @@ body {
   opacity: 0.8;
 }
 
+/* Keep the pin button visible once pinned, even when the row isn't hovered —
+   otherwise the parent's opacity:0 masks the "pinned" state entirely, since
+   opacity composites down the tree regardless of the child's own opacity. */
+.file-item-actions:has(.file-action-btn.pinned) {
+  opacity: 0.8;
+}
+
 /* On touch devices there is no hover, so revealing row actions on :hover turns
    the first tap into a no-op "hover" and opening a file needs a second tap.
    Show the actions at rest on touch so a single tap opens the item. */
