@@ -16,6 +16,7 @@ import {
   AlertCircle,
   Pin,
   X,
+  Check,
   Image as ImageIcon,
   Video as VideoIcon,
   Terminal as TerminalIcon,
@@ -662,6 +663,11 @@ export default function FileBrowser({
 
   // Central keyboard navigation for the entire sidebar
   const handleSidebarKeyDown = (e: React.KeyboardEvent) => {
+    // Let inline text inputs (new file/folder naming, etc.) handle their own
+    // keystrokes untouched — otherwise this handler's Enter/Space/Backspace
+    // navigation shortcuts hijack normal typing (e.g. swallowing spacebar).
+    if (creatingFile) return;
+
     if (e.key === "Backspace") {
       e.preventDefault();
       if (viewMode === "list" && canGoUp() && !loading) {
@@ -1066,6 +1072,28 @@ export default function FileBrowser({
                   width: "100%",
                 }}
               />
+              <button
+                tabIndex={-1}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => handleCreateFile()}
+                title="Create file"
+                style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0, display: "flex", alignItems: "center", color: "var(--accent)", flexShrink: 0 }}
+              >
+                <Check className="w-3.5 h-3.5" />
+              </button>
+              <button
+                tabIndex={-1}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  setCreatingFile(false);
+                  setNewFileName("");
+                  sidebarRef.current?.focus();
+                }}
+                title="Cancel"
+                style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0, display: "flex", alignItems: "center", color: "var(--text-secondary)", flexShrink: 0 }}
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
             </div>
           </div>
         )}
