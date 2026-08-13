@@ -854,6 +854,14 @@ export default function App() {
                 onSave={handleSaveFile}
                 onChange={handleContentChange}
                 onOpenFile={handleSelectFile}
+                isPinned={pinnedWorkspaces.some((p) => p.path === selectedFile)}
+                onTogglePin={() => {
+                  setPinnedWorkspaces(
+                    pinnedWorkspaces.some((p) => p.path === selectedFile)
+                      ? pinnedWorkspaces.filter((p) => p.path !== selectedFile)
+                      : [...pinnedWorkspaces, { path: selectedFile, isDir: false }]
+                  );
+                }}
               />
             )
           ) : (

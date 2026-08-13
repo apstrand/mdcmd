@@ -32,6 +32,7 @@ import {
   X,
   ZoomIn,
   ZoomOut,
+  Pin,
 } from "lucide-react";
 
 const ZOOM_MIN = 0.6;
@@ -195,6 +196,8 @@ interface MarkdownEditorProps {
    *  the absolute path). */
   pathLabel?: string;
   onOpenFile?: (path: string) => void;
+  isPinned?: boolean;
+  onTogglePin?: () => void;
 }
 
 export default function MarkdownEditor({
@@ -204,6 +207,8 @@ export default function MarkdownEditor({
   onChange,
   pathLabel,
   onOpenFile,
+  isPinned,
+  onTogglePin,
 }: MarkdownEditorProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -756,6 +761,16 @@ export default function MarkdownEditor({
                 {pathLabel || filePath}
               </div>
             </div>
+            {onTogglePin && (
+              <button
+                className={`file-action-btn ${isPinned ? "pinned" : ""}`}
+                onClick={onTogglePin}
+                title={isPinned ? "Remove from Workspaces" : "Pin to Workspaces"}
+                style={{ marginLeft: "8px", flexShrink: 0 }}
+              >
+                <Pin className={`w-3.5 h-3.5 ${isPinned ? "text-accent" : ""}`} />
+              </button>
+            )}
           </div>
 
           {isMarkdown && (
