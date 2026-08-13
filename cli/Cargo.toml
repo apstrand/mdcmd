@@ -26,3 +26,13 @@ tui-term = "0.3.4"
 portable-pty = "0.9.0"
 vt100 = "0.16.2"
 notify = "6"
+
+# Local-only fix for a bug in ratatui-image 11.0.6's SlicedImage rendering
+# (src/sliced.rs): when an image taller than the viewport is scrolled to a
+# middle position (both skip_line_count and drop_line_count nonzero), the
+# `take()` count is computed from the pre-`skip()` length instead of what's
+# left after skipping, so `min(skip_line_count, drop_line_count)` extra rows
+# render past where the image should end. Not submitted upstream — see
+# vendor/ratatui-image-11.0.6/src/sliced.rs for the one-line fix.
+[patch.crates-io]
+ratatui-image = { path = "vendor/ratatui-image-11.0.6" }
