@@ -161,6 +161,17 @@ export const dropboxBackend: StorageBackend = {
     }
   },
 
+  async createFolder(path: string) {
+    try {
+      await rpc("/files/create_folder_v2", { path: toDbxPath(path), autorename: false });
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("409")) {
+        throw new Error(`Folder already exists: ${path}`);
+      }
+      throw err;
+    }
+  },
+
   async searchDirectory(path: string, query: string) {
     interface SearchResult {
       matches: { metadata: { metadata: DbxEntry } }[];

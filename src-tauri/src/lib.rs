@@ -166,6 +166,15 @@ fn create_file(path: String) -> Result<(), String> {
     std::fs::write(p, "").map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn create_folder(path: String) -> Result<(), String> {
+    let p = Path::new(&path);
+    if p.exists() {
+        return Err(format!("Folder already exists: {}", p.display()));
+    }
+    std::fs::create_dir_all(p).map_err(|e| e.to_string())
+}
+
 /// Read the pinned workspaces from the shared CLI config file.
 /// Supports both legacy string entries and the current `{path, isDir}` form.
 #[tauri::command]
@@ -672,6 +681,7 @@ pub fn run() {
             read_file_content,
             write_file_content,
             create_file,
+            create_folder,
             read_workspaces,
             write_workspaces,
             open_terminal,
@@ -701,6 +711,7 @@ pub fn run() {
         read_file_content,
         write_file_content,
         create_file,
+        create_folder,
         read_workspaces,
         write_workspaces,
         search_directory,

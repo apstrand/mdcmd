@@ -65,6 +65,8 @@ export interface StorageBackend {
   writeFile(path: string, content: string): Promise<void>;
   /** Create a new empty file; rejects if it already exists. */
   createFile(path: string): Promise<void>;
+  /** Create a new empty folder; rejects if it already exists. */
+  createFolder(path: string): Promise<void>;
   searchDirectory(path: string, query: string): Promise<FileEntry[]>;
   readWorkspaces(): Promise<PinnedItem[]>;
   writeWorkspaces(items: PinnedItem[]): Promise<void>;

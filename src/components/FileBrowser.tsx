@@ -8,6 +8,7 @@ import {
   disconnectProvider,
   type WebProviderId,
 } from "../storage/web";
+import { rtlTruncate } from "../utils/paths";
 import {
   Folder,
   FileText,
@@ -51,8 +52,8 @@ interface FileBrowserProps {
   selectedFile: string | null;
   onSelectFile: (path: string) => void;
   width: number;
-  pinnedWorkspaces: PinnedItem[];
-  setPinnedWorkspaces: (items: PinnedItem[]) => void;
+  pinnedShortcuts: PinnedItem[];
+  setPinnedShortcuts: (items: PinnedItem[]) => void;
   sortedPinned: PinnedItem[];
   viewMode: "list" | "tree";
   setViewMode: (mode: "list" | "tree") => void;
@@ -65,8 +66,8 @@ export default function FileBrowser({
   selectedFile,
   onSelectFile,
   width,
-  pinnedWorkspaces,
-  setPinnedWorkspaces,
+  pinnedShortcuts,
+  setPinnedShortcuts,
   sortedPinned,
   viewMode,
   setViewMode,
@@ -84,26 +85,51 @@ export default function FileBrowser({
   // this null and the footer is hidden.
   const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
 
-  // New-file creation state
-  const [creatingFile, setCreatingFile] = useState(false);
-  const [newFileName, setNewFileName] = useState("");
+  // New file/folder creation state: set while the inline create-input is
+  // active. `isDir` distinguishes file vs. folder; `dir` is the resolved
+  // target directory (the folder being browsed, or a right-clicked folder
+  // entry/background from the context menu).
+  const [createTarget, setCreateTarget] = useState<{ isDir: boolean; dir: string } | null>(null);
+  const [createName, setCreateName] = useState("");
   const [reloadToken, setReloadToken] = useState(0);
-  const newFileInputRef = useRef<HTMLInputElement>(null);
+  const createInputRef = useRef<HTMLInputElement>(null);
+
+  // Right-click context menu (folder entries + folder-pane background), with
+  // "New File" / "New Folder" actions targeting whichever folder it was
+  // opened on.
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; dir: string } | null>(null);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    const closeOnEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setContextMenu(null);
+    };
+    window.addEventListener("click", close);
+    window.addEventListener("contextmenu", close);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("contextmenu", close);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [contextMenu]);
 
   const sidebarRef = useRef<HTMLDivElement>(null);
 
-  // Active section tracking: "workspace" or "folders"
-  const [activeSection, setActiveSection] = useState<"workspace" | "folders">("folders");
-  const [focusedWorkspaceIndex, setFocusedWorkspaceIndex] = useState<number>(0);
+  // Active section tracking: "shortcuts" or "folders"
+  const [activeSection, setActiveSection] = useState<"shortcuts" | "folders">("folders");
+  const [focusedShortcutIndex, setFocusedShortcutIndex] = useState<number>(0);
   const [focusedEntryIndex, setFocusedEntryIndex] = useState<number>(0);
 
-  // Persistent top-pane (folders) height percentage (default 25%)
+  // Persistent top-pane (folders) height percentage (default 80%, a 4:1
+  // folders:shortcuts split, since folders is the primary navigation area)
   const [topSectionHeightPercent, setTopSectionHeightPercent] = useState<number>(() => {
     try {
       const saved = localStorage.getItem("tauri-markdown-top-section-ratio");
-      return saved ? parseFloat(saved) : 25;
+      return saved ? parseFloat(saved) : 80;
     } catch {
-      return 25;
+      return 80;
     }
   });
 
@@ -124,7 +150,7 @@ export default function FileBrowser({
     sidebarRef.current?.focus();
   }, []);
 
-  // Drag resizing for workspace section height
+  // Drag resizing for shortcuts section height
   const startSectionResize = (mouseDownEvent: React.MouseEvent) => {
     mouseDownEvent.preventDefault();
     const sidebarElement = mouseDownEvent.currentTarget.parentElement;
@@ -154,7 +180,7 @@ export default function FileBrowser({
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<FileEntry[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [searchScope, setSearchScope] = useState<"folder" | "workspaces">("folder");
+  const [searchScope, setSearchScope] = useState<"folder" | "shortcuts">("folder");
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const getFileName = (pathStr: string) => {
@@ -164,7 +190,7 @@ export default function FileBrowser({
   };
 
   // Global key bindings to focus search input
-  // '/' toggles folder search, 'Cmd+Shift+F' or 'Ctrl+Shift+F' toggles workspace search
+  // '/' toggles folder search, 'Cmd+Shift+F' or 'Ctrl+Shift+F' toggles shortcuts search
   useEffect(() => {
     const handleGlobalShortcuts = (e: KeyboardEvent) => {
       const isCmd = e.metaKey || e.ctrlKey;
@@ -180,7 +206,7 @@ export default function FileBrowser({
 
       if (isCmd && isShift && e.key.toLowerCase() === "f") {
         e.preventDefault();
-        setSearchScope("workspaces");
+        setSearchScope("shortcuts");
         searchInputRef.current?.focus();
         searchInputRef.current?.select();
       } else if (e.key === "/") {
@@ -203,12 +229,12 @@ export default function FileBrowser({
     const delayDebounceFn = setTimeout(async () => {
       setIsSearching(true);
       try {
-        if (searchScope === "workspaces") {
-          // Search in all pinned workspaces
+        if (searchScope === "shortcuts") {
+          // Search in all pinned shortcuts
           const allResults: FileEntry[] = [];
           const seenPaths = new Set<string>();
 
-          for (const item of pinnedWorkspaces) {
+          for (const item of pinnedShortcuts) {
             if (item.isDir) {
               try {
                 const res = await storage.searchDirectory(item.path, searchQuery);
@@ -219,7 +245,7 @@ export default function FileBrowser({
                   }
                 }
               } catch (err) {
-                console.error(`Search error in workspace ${item.path}:`, err);
+                console.error(`Search error in shortcut ${item.path}:`, err);
               }
             } else {
               // Pinned file: match name case-insensitively
@@ -251,7 +277,7 @@ export default function FileBrowser({
     }, 150);
 
     return () => clearTimeout(delayDebounceFn);
-  }, [searchQuery, searchScope, viewMode, treeRootPath, currentPath, pinnedWorkspaces]);
+  }, [searchQuery, searchScope, viewMode, treeRootPath, currentPath, pinnedShortcuts]);
 
   // Sync treeRootPath when currentPath is set and treeRootPath is still "/"
   useEffect(() => {
@@ -330,8 +356,8 @@ export default function FileBrowser({
       if (flatNodes.length === 0) {
         setFocusedNodeIndex(-1);
         if (activeSection === "folders" && sortedPinned.length > 0) {
-          setActiveSection("workspace");
-          setFocusedWorkspaceIndex(sortedPinned.length - 1);
+          setActiveSection("shortcuts");
+          setFocusedShortcutIndex(sortedPinned.length - 1);
         }
       } else {
         if (focusedNodeIndex < 0 || focusedNodeIndex >= flatNodes.length) {
@@ -342,8 +368,8 @@ export default function FileBrowser({
       if (entries.length === 0) {
         setFocusedEntryIndex(-1);
         if (activeSection === "folders" && sortedPinned.length > 0) {
-          setActiveSection("workspace");
-          setFocusedWorkspaceIndex(sortedPinned.length - 1);
+          setActiveSection("shortcuts");
+          setFocusedShortcutIndex(sortedPinned.length - 1);
         }
       } else {
         if (focusedEntryIndex < 0 || focusedEntryIndex >= entries.length) {
@@ -353,11 +379,11 @@ export default function FileBrowser({
     }
   }, [entries, activeSection, sortedPinned.length, flatNodes.length, viewMode]);
 
-  // Sync workspaces focus bounds when pinned items change
+  // Sync shortcuts focus bounds when pinned items change
   useEffect(() => {
     if (sortedPinned.length === 0) {
-      setFocusedWorkspaceIndex(-1);
-      if (activeSection === "workspace") {
+      setFocusedShortcutIndex(-1);
+      if (activeSection === "shortcuts") {
         setActiveSection("folders");
         if (viewMode === "tree") {
           setFocusedNodeIndex(0);
@@ -366,8 +392,8 @@ export default function FileBrowser({
         }
       }
     } else {
-      if (focusedWorkspaceIndex < 0 || focusedWorkspaceIndex >= sortedPinned.length) {
-        setFocusedWorkspaceIndex(0);
+      if (focusedShortcutIndex < 0 || focusedShortcutIndex >= sortedPinned.length) {
+        setFocusedShortcutIndex(0);
       }
     }
   }, [sortedPinned, activeSection, viewMode]);
@@ -394,13 +420,13 @@ export default function FileBrowser({
     }
   }, [selectedFile, flatNodes.length, viewMode]);
 
-  // Scroll focused entry or workspace folder into view
+  // Scroll focused entry or shortcut folder into view
   useEffect(() => {
     const el = sidebarRef.current?.querySelector(".keyboard-focused");
     if (el) {
       el.scrollIntoView({ block: "nearest" });
     }
-  }, [focusedEntryIndex, focusedWorkspaceIndex, activeSection]);
+  }, [focusedEntryIndex, focusedShortcutIndex, activeSection]);
 
   // Initialize path to home directory if empty
   useEffect(() => {
@@ -459,7 +485,7 @@ export default function FileBrowser({
   const getPinnedRoot = (path: string): string | null => {
     if (!path) return null;
     const sep = path.includes("\\") ? "\\" : "/";
-    const root = pinnedWorkspaces
+    const root = pinnedShortcuts
       .filter(
         (p) =>
           p.isDir &&
@@ -470,63 +496,73 @@ export default function FileBrowser({
     return root ? root.path.replace(/[/\\]+$/, "") : null;
   };
 
-  // Whether navigation is capped at a picked root (mobile document-picker roots
-  // are security-scoped, so going above them isn't allowed).
-  const navRoot = () =>
-    storage.capabilities.documentPicker ? getPinnedRoot(currentPath) : null;
+  // Whether navigation from `path` is capped at a picked root (mobile
+  // document-picker roots are security-scoped, so going above them isn't
+  // allowed).
+  const navRoot = (path: string) =>
+    storage.capabilities.documentPicker ? getPinnedRoot(path) : null;
 
-  const handleGoUp = () => {
-    if (!currentPath) return;
-    const isWindows = currentPath.includes("\\");
+  // The parent of `path`, or null if there's nowhere further up to go (either
+  // filesystem root or a picked storage root boundary).
+  const computeParentPath = (path: string): string | null => {
+    if (!path) return null;
+    const isWindows = path.includes("\\");
     const separator = isWindows ? "\\" : "/";
-    const parts = currentPath.split(separator);
+    const parts = path.split(separator);
 
-    if (parts.length > 1) {
-      if (parts[parts.length - 1] === "") {
-        parts.pop();
-      }
+    if (parts.length <= 1) return null;
+
+    if (parts[parts.length - 1] === "") {
       parts.pop();
-
-      let parent = parts.join(separator);
-      if (parent === "" && !isWindows) {
-        parent = "/";
-      }
-      if (isWindows && parent.endsWith(":")) {
-        parent = parent + "\\";
-      }
-
-      // Don't step above a picked storage root.
-      const root = navRoot();
-      if (root && (parent.length < root.length || !root.startsWith(parent))) {
-        return;
-      }
-
-      setCurrentPath(parent || separator);
     }
+    parts.pop();
+
+    let parent = parts.join(separator);
+    if (parent === "" && !isWindows) {
+      parent = "/";
+    }
+    if (isWindows && parent.endsWith(":")) {
+      parent = parent + "\\";
+    }
+
+    // Don't step above a picked storage root.
+    const root = navRoot(path);
+    if (root && (parent.length < root.length || !root.startsWith(parent))) {
+      return null;
+    }
+
+    return parent || separator;
   };
 
-  // Determine if we can go up further
-  const canGoUp = () => {
-    if (!currentPath) return false;
+  // Determine if `path` can go up further
+  const canGoUpPath = (path: string): boolean => {
+    if (!path) return false;
     // At (or would step above) a picked storage root: stop here.
-    const root = navRoot();
-    if (root && currentPath.replace(/[/\\]+$/, "") === root) {
+    const root = navRoot(path);
+    if (root && path.replace(/[/\\]+$/, "") === root) {
       return false;
     }
-    const isWindows = currentPath.includes("\\");
+    const isWindows = path.includes("\\");
     if (isWindows) {
-      return currentPath.split("\\").filter(Boolean).length > 1;
+      return path.split("\\").filter(Boolean).length > 1;
     } else {
-      return currentPath !== "/";
+      return path !== "/";
     }
   };
 
-  // Left-truncating path text (".path-ellipsis-left"/".workspace-item-path")
-  // renders with `direction: rtl` so the ellipsis appears on the left. That
-  // trick reorders bidi-neutral characters at the string's start/end, which
-  // visually moves a leading "/" to the end of the text (looks like a bogus
-  // trailing slash). Stripping it before render avoids that artifact.
-  const rtlTruncate = (path: string) => path.replace(/^[/\\]+/, "");
+  const handleGoUp = () => {
+    const parent = computeParentPath(currentPath);
+    if (parent) setCurrentPath(parent);
+  };
+
+  const canGoUp = () => canGoUpPath(currentPath);
+
+  const handleGoUpTree = () => {
+    const parent = computeParentPath(treeRootPath);
+    if (parent) setTreeRootPath(parent);
+  };
+
+  const canGoUpTree = () => canGoUpPath(treeRootPath);
 
   // Extract folder name from absolute path
   const getFolderName = (path: string) => {
@@ -546,7 +582,7 @@ export default function FileBrowser({
   const displayPath = (fullPath: string) => {
     if (!fullPath) return fullPath;
     const sep = fullPath.includes("\\") ? "\\" : "/";
-    const root = pinnedWorkspaces
+    const root = pinnedShortcuts
       .filter(
         (p) =>
           p.isDir &&
@@ -562,14 +598,14 @@ export default function FileBrowser({
 
   // Pin a folder or file
   const handlePin = (path: string, isDir: boolean) => {
-    if (!pinnedWorkspaces.some((p) => p.path === path)) {
-      setPinnedWorkspaces([...pinnedWorkspaces, { path, isDir }]);
+    if (!pinnedShortcuts.some((p) => p.path === path)) {
+      setPinnedShortcuts([...pinnedShortcuts, { path, isDir }]);
     }
   };
 
   // Unpin a folder or file
   const handleUnpin = (path: string) => {
-    setPinnedWorkspaces(pinnedWorkspaces.filter((p) => p.path !== path));
+    setPinnedShortcuts(pinnedShortcuts.filter((p) => p.path !== path));
     // On iOS, dropping a picked folder should also release its security-scoped
     // bookmark so we stop holding access to it.
     storage.releaseFolder?.(path).catch((err) =>
@@ -592,7 +628,7 @@ export default function FileBrowser({
   };
 
   // Pick a folder via the native document picker (iOS) and pin it as a
-  // workspace, then navigate into it.
+  // shortcut, then navigate into it.
   const [isPicking, setIsPicking] = useState(false);
   const handleAddFolder = async () => {
     if (!storage.pickFolder) return;
@@ -618,34 +654,48 @@ export default function FileBrowser({
     sidebarRef.current?.focus();
   };
 
-  // Begin creating a new file in the current folder
-  const startCreateFile = () => {
+  // Begin creating a new file or folder. `dir` overrides the target
+  // directory (used by the context menu); defaults to whichever folder is
+  // currently being browsed.
+  const startCreate = (isDir: boolean, dir?: string) => {
+    const targetDir = dir ?? (viewMode === "tree" ? treeRootPath : currentPath);
+    if (!targetDir) return;
     setError(null);
-    setCreatingFile(true);
-    setNewFileName("");
+    setCreateTarget({ isDir, dir: targetDir });
+    setCreateName("");
+    setContextMenu(null);
     // Focus the input on the next tick once it has rendered
-    setTimeout(() => newFileInputRef.current?.focus(), 0);
+    setTimeout(() => createInputRef.current?.focus(), 0);
   };
 
-  // Create a new (empty) file in the current folder and open it
-  const handleCreateFile = async () => {
-    const name = newFileName.trim();
+  const cancelCreate = () => {
+    setCreateTarget(null);
+    setCreateName("");
+    sidebarRef.current?.focus();
+  };
+
+  // Create the new (empty) file/folder and, for files, open it
+  const handleCreate = async () => {
+    if (!createTarget) return;
+    const name = createName.trim();
     if (!name) {
-      setCreatingFile(false);
-      sidebarRef.current?.focus();
+      cancelCreate();
       return;
     }
-    const targetDir = viewMode === "tree" ? treeRootPath : currentPath;
-    if (!targetDir) return;
+    const { isDir, dir: targetDir } = createTarget;
     const isWindows = targetDir.includes("\\");
     const sep = isWindows ? "\\" : "/";
     const fullPath = targetDir.endsWith(sep) ? `${targetDir}${name}` : `${targetDir}${sep}${name}`;
 
     try {
-      await storage.createFile(fullPath);
-      setCreatingFile(false);
-      setNewFileName("");
-      // Refresh listings so the new file shows up
+      if (isDir) {
+        await storage.createFolder(fullPath);
+      } else {
+        await storage.createFile(fullPath);
+      }
+      setCreateTarget(null);
+      setCreateName("");
+      // Refresh listings so the new file/folder shows up
       setReloadToken((t) => t + 1);
       if (viewMode === "tree") {
         try {
@@ -655,7 +705,7 @@ export default function FileBrowser({
           console.error("Failed to refresh tree directory:", err);
         }
       }
-      onSelectFile(fullPath);
+      if (!isDir) onSelectFile(fullPath);
     } catch (err) {
       setError(String(err));
     }
@@ -666,23 +716,25 @@ export default function FileBrowser({
     // Let inline text inputs (new file/folder naming, etc.) handle their own
     // keystrokes untouched — otherwise this handler's Enter/Space/Backspace
     // navigation shortcuts hijack normal typing (e.g. swallowing spacebar).
-    if (creatingFile) return;
+    if (createTarget) return;
 
     if (e.key === "Backspace") {
       e.preventDefault();
       if (viewMode === "list" && canGoUp() && !loading) {
         handleGoUp();
+      } else if (viewMode === "tree" && canGoUpTree() && !loading) {
+        handleGoUpTree();
       }
       return;
     }
 
-    if (activeSection === "workspace") {
+    if (activeSection === "shortcuts") {
       if (sortedPinned.length === 0) return;
 
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        if (focusedWorkspaceIndex < sortedPinned.length - 1) {
-          setFocusedWorkspaceIndex((prev) => prev + 1);
+        if (focusedShortcutIndex < sortedPinned.length - 1) {
+          setFocusedShortcutIndex((prev) => prev + 1);
         } else if (viewMode === "tree" ? flatNodes.length > 0 : entries.length > 0) {
           setActiveSection("folders");
           if (viewMode === "tree") {
@@ -693,10 +745,10 @@ export default function FileBrowser({
         }
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
-        setFocusedWorkspaceIndex((prev) => (prev > 0 ? prev - 1 : 0));
+        setFocusedShortcutIndex((prev) => (prev > 0 ? prev - 1 : 0));
       } else if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
-        const index = focusedWorkspaceIndex >= 0 ? focusedWorkspaceIndex : 0;
+        const index = focusedShortcutIndex >= 0 ? focusedShortcutIndex : 0;
         if (index >= 0 && index < sortedPinned.length) {
           const item = sortedPinned[index];
           if (item.isDir) {
@@ -723,8 +775,8 @@ export default function FileBrowser({
           if (focusedNodeIndex > 0) {
             setFocusedNodeIndex((prev) => prev - 1);
           } else if (sortedPinned.length > 0) {
-            setActiveSection("workspace");
-            setFocusedWorkspaceIndex(sortedPinned.length - 1);
+            setActiveSection("shortcuts");
+            setFocusedShortcutIndex(sortedPinned.length - 1);
           }
         } else if (e.key === "ArrowRight") {
           e.preventDefault();
@@ -764,8 +816,8 @@ export default function FileBrowser({
           if (focusedEntryIndex > 0) {
             setFocusedEntryIndex((prev) => prev - 1);
           } else if (sortedPinned.length > 0) {
-            setActiveSection("workspace");
-            setFocusedWorkspaceIndex(sortedPinned.length - 1);
+            setActiveSection("shortcuts");
+            setFocusedShortcutIndex(sortedPinned.length - 1);
           }
         } else if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
@@ -924,11 +976,21 @@ export default function FileBrowser({
                 className="file-action-btn"
                 tabIndex={-1}
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={startCreateFile}
+                onClick={() => startCreate(false)}
                 title="Create new file in this folder"
                 style={{ opacity: 0.8 }}
               >
                 <FilePlus className="w-3.5 h-3.5" />
+              </button>
+              <button
+                className="file-action-btn"
+                tabIndex={-1}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => startCreate(true)}
+                title="Create new folder in this folder"
+                style={{ opacity: 0.8 }}
+              >
+                <FolderPlus className="w-3.5 h-3.5" />
               </button>
               {storage.capabilities.terminal && (
                 <button
@@ -942,28 +1004,6 @@ export default function FileBrowser({
                   <TerminalIcon className="w-3.5 h-3.5" />
                 </button>
               )}
-              {viewMode === "list" && (
-                <button
-                  className="file-action-btn"
-                  tabIndex={-1}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => {
-                    const isCurrentPinned = pinnedWorkspaces.some((p) => p.path === currentPath);
-                    if (isCurrentPinned) {
-                      handleUnpin(currentPath);
-                    } else {
-                      handlePin(currentPath, true);
-                    }
-                    sidebarRef.current?.focus();
-                  }}
-                  title={pinnedWorkspaces.some((p) => p.path === currentPath) ? "Unpin current folder" : "Pin current folder"}
-                  style={{ opacity: 0.8 }}
-                >
-                  <Pin
-                    className={`w-3.5 h-3.5 ${pinnedWorkspaces.some((p) => p.path === currentPath) ? "pinned text-accent" : ""}`}
-                  />
-                </button>
-              )}
             </div>
           )}
         </div>
@@ -973,7 +1013,7 @@ export default function FileBrowser({
             <input
               ref={searchInputRef}
               type="text"
-              placeholder={searchScope === "workspaces" ? "Search workspaces... (Cmd+Shift+F)" : "Search folder... (Press /)"}
+              placeholder={searchScope === "shortcuts" ? "Search shortcuts... (Cmd+Shift+F)" : "Search folder... (Press /)"}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => {
@@ -992,7 +1032,7 @@ export default function FileBrowser({
                 width: "100%",
               }}
             />
-            {searchScope === "workspaces" ? (
+            {searchScope === "shortcuts" ? (
               <span 
                 onClick={() => setSearchScope("folder")}
                 style={{
@@ -1006,13 +1046,13 @@ export default function FileBrowser({
                   cursor: "pointer",
                   userSelect: "none"
                 }}
-                title="Searching all workspaces. Click to search current folder."
+                title="Searching all shortcuts. Click to search current folder."
               >
-                Workspaces
+                Shortcuts
               </span>
             ) : (
               <span 
-                onClick={() => setSearchScope("workspaces")}
+                onClick={() => setSearchScope("shortcuts")}
                 style={{
                   fontSize: "10px",
                   fontWeight: 600,
@@ -1024,7 +1064,7 @@ export default function FileBrowser({
                   cursor: "pointer",
                   userSelect: "none"
                 }}
-                title="Searching current folder. Click to search all pinned workspaces."
+                title="Searching current folder. Click to search all pinned shortcuts."
               >
                 Folder
               </span>
@@ -1042,25 +1082,27 @@ export default function FileBrowser({
             )}
           </div>
         </div>
-        {creatingFile && (
+        {createTarget && (
           <div style={{ padding: "0 12px 8px 12px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "6px", backgroundColor: "var(--bg-tertiary)", borderRadius: "4px", padding: "4px 8px", border: "1px solid var(--accent)" }}>
-              <FilePlus className="w-3.5 h-3.5" style={{ color: "var(--accent)", flexShrink: 0 }} />
+              {createTarget.isDir ? (
+                <FolderPlus className="w-3.5 h-3.5" style={{ color: "var(--accent)", flexShrink: 0 }} />
+              ) : (
+                <FilePlus className="w-3.5 h-3.5" style={{ color: "var(--accent)", flexShrink: 0 }} />
+              )}
               <input
-                ref={newFileInputRef}
+                ref={createInputRef}
                 type="text"
-                placeholder="new-file.md (Enter to create)"
-                value={newFileName}
-                onChange={(e) => setNewFileName(e.target.value)}
+                placeholder={createTarget.isDir ? "new-folder (Enter to create)" : "new-file.md (Enter to create)"}
+                value={createName}
+                onChange={(e) => setCreateName(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     e.preventDefault();
-                    handleCreateFile();
+                    handleCreate();
                   } else if (e.key === "Escape") {
                     e.preventDefault();
-                    setCreatingFile(false);
-                    setNewFileName("");
-                    sidebarRef.current?.focus();
+                    cancelCreate();
                   }
                 }}
                 style={{
@@ -1075,8 +1117,8 @@ export default function FileBrowser({
               <button
                 tabIndex={-1}
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() => handleCreateFile()}
-                title="Create file"
+                onClick={() => handleCreate()}
+                title={createTarget.isDir ? "Create folder" : "Create file"}
                 style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0, display: "flex", alignItems: "center", color: "var(--accent)", flexShrink: 0 }}
               >
                 <Check className="w-3.5 h-3.5" />
@@ -1084,11 +1126,7 @@ export default function FileBrowser({
               <button
                 tabIndex={-1}
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  setCreatingFile(false);
-                  setNewFileName("");
-                  sidebarRef.current?.focus();
-                }}
+                onClick={cancelCreate}
                 title="Cancel"
                 style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0, display: "flex", alignItems: "center", color: "var(--text-secondary)", flexShrink: 0 }}
               >
@@ -1097,7 +1135,14 @@ export default function FileBrowser({
             </div>
           </div>
         )}
-        <div className="sidebar-scroll-content">
+        <div
+          className="sidebar-scroll-content"
+          onContextMenu={(e) => {
+            e.preventDefault();
+            const dir = viewMode === "tree" ? treeRootPath : currentPath;
+            if (dir) setContextMenu({ x: e.clientX, y: e.clientY, dir });
+          }}
+        >
           {viewMode === "list" && (
             <div style={{ display: "flex", gap: "6px", marginBottom: "8px" }}>
               <button
@@ -1123,6 +1168,19 @@ export default function FileBrowser({
 
           {viewMode === "tree" && (
             <div style={{ display: "flex", gap: "6px", marginBottom: "8px", alignItems: "center" }}>
+              <button
+                className="nav-button"
+                tabIndex={-1}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  handleGoUpTree();
+                  sidebarRef.current?.focus();
+                }}
+                disabled={!canGoUpTree() || loading}
+                title="Go Up"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
               <div className="path-bar" title={treeRootPath} style={{ flexGrow: 1, fontSize: "11px", opacity: 0.8 }}>
                 <span style={{ flexShrink: 0 }}>🌳</span>
                 <span className="path-ellipsis-left">{rtlTruncate(displayPath(treeRootPath))}</span>
@@ -1159,16 +1217,16 @@ export default function FileBrowser({
                   const isVideo = /\.(mp4|webm|ogg|mov|mkv)$/i.test(entry.name);
                   const isSelectable = !entry.is_dir;
                   const isSelected = selectedFile === entry.path;
-                  const isPinned = pinnedWorkspaces.some((p) => p.path === entry.path);
+                  const isPinned = pinnedShortcuts.some((p) => p.path === entry.path);
                   
                   let relPath = entry.path;
-                  if (searchScope === "workspaces") {
-                    const matchingWorkspace = pinnedWorkspaces.find(
+                  if (searchScope === "shortcuts") {
+                    const matchingShortcut = pinnedShortcuts.find(
                       (p) => p.isDir && entry.path.startsWith(p.path)
                     );
-                    if (matchingWorkspace) {
-                      const wsName = getFileName(matchingWorkspace.path);
-                      const subPath = entry.path.substring(matchingWorkspace.path.length).replace(/^[/\\]/, "");
+                    if (matchingShortcut) {
+                      const wsName = getFileName(matchingShortcut.path);
+                      const subPath = entry.path.substring(matchingShortcut.path.length).replace(/^[/\\]/, "");
                       relPath = subPath ? `${wsName} › ${subPath}` : wsName;
                     } else {
                       relPath = getFileName(entry.path);
@@ -1250,7 +1308,7 @@ export default function FileBrowser({
                             }
                             sidebarRef.current?.focus();
                           }}
-                          title={isPinned ? "Remove from Workspaces" : "Pin to Workspaces"}
+                          title={isPinned ? "Remove from Shortcuts" : "Pin to Shortcuts"}
                         >
                           <Pin
                             className={`w-3.5 h-3.5 ${isPinned ? "text-accent" : ""}`}
@@ -1334,7 +1392,7 @@ export default function FileBrowser({
                   const isSelectable = !entry.is_dir;
                   
                   const isSelected = selectedFile === entry.path;
-                  const isPinned = pinnedWorkspaces.some((p) => p.path === entry.path);
+                  const isPinned = pinnedShortcuts.some((p) => p.path === entry.path);
                   const isFocused = activeSection === "folders" && focusedEntryIndex === index;
                   
                   return (
@@ -1349,6 +1407,12 @@ export default function FileBrowser({
                         } else if (isSelectable) {
                           onSelectFile(entry.path);
                         }
+                      }}
+                      onContextMenu={(e) => {
+                        if (!entry.is_dir) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setContextMenu({ x: e.clientX, y: e.clientY, dir: entry.path });
                       }}
                       style={{
                         opacity: !entry.is_dir && !isSelectable ? 0.45 : 1,
@@ -1391,7 +1455,7 @@ export default function FileBrowser({
                             }
                             sidebarRef.current?.focus();
                           }}
-                          title={isPinned ? "Remove from Workspaces" : "Pin to Workspaces"}
+                          title={isPinned ? "Remove from Shortcuts" : "Pin to Shortcuts"}
                         >
                           <Pin
                             className={`w-3.5 h-3.5 ${isPinned ? "text-accent" : ""}`}
@@ -1409,14 +1473,14 @@ export default function FileBrowser({
             <div className="file-list">
               {flatNodes.length === 0 ? (
                 <div style={{ padding: "16px", textAlign: "center", fontSize: "12px", color: "var(--text-secondary)" }}>
-                  Empty Workspace
+                  Empty Directory
                 </div>
               ) : (
                 flatNodes.map((node, index) => {
                   const isImage = /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(node.name);
                   const isVideo = /\.(mp4|webm|ogg|mov|mkv)$/i.test(node.name);
                   const isSelected = selectedFile === node.path;
-                  const isPinned = pinnedWorkspaces.some((p) => p.path === node.path);
+                  const isPinned = pinnedShortcuts.some((p) => p.path === node.path);
                   const isFocused = activeSection === "folders" && focusedNodeIndex === index;
                   const isExpanded = expandedPaths[node.path];
 
@@ -1432,6 +1496,12 @@ export default function FileBrowser({
                         } else {
                           onSelectFile(node.path);
                         }
+                      }}
+                      onContextMenu={(e) => {
+                        if (!node.isDir) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setContextMenu({ x: e.clientX, y: e.clientY, dir: node.path });
                       }}
                       style={{
                         paddingLeft: `${node.depth * 12 + 8}px`,
@@ -1479,7 +1549,7 @@ export default function FileBrowser({
                             }
                             sidebarRef.current?.focus();
                           }}
-                          title={isPinned ? "Remove from Workspaces" : "Pin to Workspaces"}
+                          title={isPinned ? "Remove from Shortcuts" : "Pin to Shortcuts"}
                         >
                           <Pin
                             className={`w-3.5 h-3.5 ${isPinned ? "text-accent" : ""}`}
@@ -1498,17 +1568,17 @@ export default function FileBrowser({
       {/* Horizontal Drag Resizer divider */}
       <div className="section-resizer" onMouseDown={startSectionResize} />
 
-      {/* Workspaces Section (Lower Sidebar Pane) */}
+      {/* Shortcuts Section (Lower Sidebar Pane) */}
       <div
-        className="sidebar-section workspace"
+        className="sidebar-section shortcuts"
         onClick={() => {
-          setActiveSection("workspace");
+          setActiveSection("shortcuts");
         }}
       >
         <div className="sidebar-subheader">
           <span className="sidebar-section-title">
             <Pin className="w-3.5 h-3.5 text-accent" style={{ fill: "var(--accent)" }} />
-            <span>Workspaces</span>
+            <span>Shortcuts</span>
           </span>
           {storage.capabilities.documentPicker && (
             <button
@@ -1534,19 +1604,19 @@ export default function FileBrowser({
         <div className="sidebar-scroll-content">
           {sortedPinned.length === 0 ? (
             <div style={{ padding: "16px", textAlign: "center", fontSize: "12px", color: "var(--text-secondary)", opacity: 0.7 }}>
-              No pinned workspaces.
+              No pinned shortcuts.
             </div>
           ) : (
-            <div className="workspace-list">
+            <div className="shortcut-list">
               {sortedPinned.map((item, index) => {
-                const isFocused = activeSection === "workspace" && focusedWorkspaceIndex === index;
+                const isFocused = activeSection === "shortcuts" && focusedShortcutIndex === index;
                 return (
                   <div
                     key={item.path}
-                    className={`workspace-item ${isFocused ? "keyboard-focused" : ""}`}
+                    className={`shortcut-item ${isFocused ? "keyboard-focused" : ""}`}
                     onClick={() => {
-                      setActiveSection("workspace");
-                      setFocusedWorkspaceIndex(index);
+                      setActiveSection("shortcuts");
+                      setFocusedShortcutIndex(index);
                       if (item.isDir) {
                         setCurrentPath(item.path);
                         if (viewMode === "tree") {
@@ -1558,20 +1628,20 @@ export default function FileBrowser({
                     }}
                     title={item.path}
                   >
-                    <div className="workspace-item-info">
+                    <div className="shortcut-item-info">
                       {item.isDir ? (
                         <Folder style={{ width: "15px", height: "15px", color: "var(--accent)" }} />
                       ) : (
                         <FileText style={{ width: "15px", height: "15px", color: "var(--text-secondary)" }} />
                       )}
-                      <div className="workspace-item-text">
-                        <span className="workspace-item-name">{getFolderName(item.path)}</span>
-                        <span className="workspace-item-path">{rtlTruncate(item.path)}</span>
+                      <div className="shortcut-item-text">
+                        <span className="shortcut-item-name">{getFolderName(item.path)}</span>
+                        <span className="shortcut-item-path">{rtlTruncate(item.path)}</span>
                       </div>
                     </div>
-                    <div className="workspace-item-actions">
+                    <div className="shortcut-item-actions">
                       <button
-                        className="workspace-action-btn"
+                        className="shortcut-action-btn"
                         tabIndex={-1}
                         onMouseDown={(e) => e.preventDefault()}
                         onClick={(e) => {
@@ -1603,6 +1673,42 @@ export default function FileBrowser({
           <span className="sidebar-footer-commit">{versionInfo.commit}</span>
           <span className="sidebar-footer-sep">·</span>
           <span className="sidebar-footer-date">{versionInfo.commitDate}</span>
+        </div>
+      )}
+
+      {contextMenu && (
+        <div
+          style={{
+            position: "fixed",
+            left: contextMenu.x,
+            top: contextMenu.y,
+            zIndex: 1000,
+            backgroundColor: "var(--bg-secondary)",
+            border: "1px solid var(--border)",
+            borderRadius: "6px",
+            boxShadow: "0 4px 12px rgba(0, 0, 0, 0.25)",
+            padding: "4px",
+            minWidth: "160px",
+          }}
+          onClick={(e) => e.stopPropagation()}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          <button
+            className="context-menu-item"
+            style={{ display: "flex", alignItems: "center", gap: "8px", width: "100%", padding: "6px 10px", border: "none", background: "transparent", cursor: "pointer", color: "var(--text-primary)", fontSize: "13px", textAlign: "left", borderRadius: "4px" }}
+            onClick={() => startCreate(false, contextMenu.dir)}
+          >
+            <FilePlus className="w-3.5 h-3.5" />
+            New File
+          </button>
+          <button
+            className="context-menu-item"
+            style={{ display: "flex", alignItems: "center", gap: "8px", width: "100%", padding: "6px 10px", border: "none", background: "transparent", cursor: "pointer", color: "var(--text-primary)", fontSize: "13px", textAlign: "left", borderRadius: "4px" }}
+            onClick={() => startCreate(true, contextMenu.dir)}
+          >
+            <FolderPlus className="w-3.5 h-3.5" />
+            New Folder
+          </button>
         </div>
       )}
     </div>

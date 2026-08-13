@@ -253,6 +253,33 @@ export const githubBackend: StorageBackend = {
     }
   },
 
+  async createFolder(path: string) {
+    // Git has no concept of an empty folder — it only tracks files. Commit a
+    // placeholder `.gitkeep` file inside the target path so the folder shows
+    // up in listings, the same trick used elsewhere in git tooling.
+    const { owner, repo, inRepoPath } = parsePath(path);
+    if (!owner || !repo || !inRepoPath) throw new Error(`Cannot create folder here: ${path}`);
+    const branch = await defaultBranch(owner, repo);
+    const keepPath = `${inRepoPath}/.gitkeep`;
+
+    const head = await ghFetch(
+      `/repos/${owner}/${repo}/contents/${inRepoPath}?ref=${encodeURIComponent(branch)}`,
+    );
+    if (head.ok) throw new Error(`Folder already exists: ${path}`);
+
+    const res = await ghFetch(`/repos/${owner}/${repo}/contents/${keepPath}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        message: `Create ${inRepoPath}/`,
+        content: "",
+        branch,
+      }),
+    });
+    if (!res.ok) {
+      throw new Error(`GitHub create failed (${res.status}): ${await res.text()}`);
+    }
+  },
+
   async searchDirectory(path: string, query: string) {
     const { owner, repo, inRepoPath } = parsePath(path);
     // Code search is only available scoped to a repository.

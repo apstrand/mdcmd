@@ -3,6 +3,17 @@ export interface PathRoot {
   isDir: boolean;
 }
 
+/**
+ * Strip a leading slash/backslash. Needed before rendering a path inside an
+ * element that uses the `direction: rtl; text-align: left` trick to
+ * left-truncate long paths — without this, a leading separator gets
+ * bidi-relocated to the visual end of the text and reads as a bogus
+ * trailing slash.
+ */
+export function rtlTruncate(path: string): string {
+  return path.replace(/^[/\\]+/, "");
+}
+
 function lastComponent(p: string): string {
   const parts = p.replace(/[/\\]+$/, "").split(/[/\\]/).filter(Boolean);
   return parts.length ? parts[parts.length - 1] : p;

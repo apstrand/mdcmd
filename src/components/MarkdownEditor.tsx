@@ -24,7 +24,6 @@ import {
   Redo2,
   Save,
   CodeSquare,
-  CheckCircle,
   FileEdit,
   Lock,
   ChevronDown,
@@ -35,6 +34,7 @@ import {
   Pin,
   BookOpen,
 } from "lucide-react";
+import { rtlTruncate } from "../utils/paths";
 
 const ZOOM_MIN = 0.6;
 const ZOOM_MAX = 2.5;
@@ -200,6 +200,7 @@ interface MarkdownEditorProps {
   onOpenFile?: (path: string) => void;
   isPinned?: boolean;
   onTogglePin?: () => void;
+  isDirty?: boolean;
 }
 
 export default function MarkdownEditor({
@@ -211,9 +212,9 @@ export default function MarkdownEditor({
   onOpenFile,
   isPinned,
   onTogglePin,
+  isDirty,
 }: MarkdownEditorProps) {
   const [isSaving, setIsSaving] = useState(false);
-  const [saveSuccess, setSaveSuccess] = useState(false);
   const [editMode, setEditMode] = useState<"rich" | "plain">("rich");
 
   // Reading theme for rendered markdown: "reading" favors long-form prose
@@ -602,8 +603,7 @@ export default function MarkdownEditor({
   // Handle Save operation
   const handleSave = async () => {
     setIsSaving(true);
-    setSaveSuccess(false);
-    
+
     let contentToSave = "";
     if (isMarkdown) {
       if (editMode === "rich" && editor) {
@@ -617,9 +617,7 @@ export default function MarkdownEditor({
 
     try {
       await onSave(filePath, contentToSave);
-      setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 2000);
-      
+
       // Keep rich and plain views in sync after saving
       if (isMarkdown) {
         if (editMode === "rich") {
@@ -779,14 +777,14 @@ export default function MarkdownEditor({
             <div className="file-title-lines">
               <div className="file-name-text">{getFileName(filePath)}</div>
               <div className="file-path-text" title={filePath}>
-                {pathLabel || filePath}
+                {rtlTruncate(pathLabel || filePath)}
               </div>
             </div>
             {onTogglePin && (
               <button
                 className={`file-action-btn ${isPinned ? "pinned" : ""}`}
                 onClick={onTogglePin}
-                title={isPinned ? "Remove from Workspaces" : "Pin to Workspaces"}
+                title={isPinned ? "Remove from Shortcuts" : "Pin to Shortcuts"}
                 style={{ marginLeft: "8px", flexShrink: 0 }}
               >
                 <Pin className={`w-3.5 h-3.5 ${isPinned ? "text-accent" : ""}`} />
@@ -881,15 +879,10 @@ export default function MarkdownEditor({
           <div className="save-status">
             {isEditable ? (
               <>
-                {saveSuccess && (
-                  <span style={{ color: "hsl(142, 71%, 45%)", display: "flex", alignItems: "center", gap: "4px", fontSize: "13px" }}>
-                    <CheckCircle className="w-4 h-4" /> Saved
-                  </span>
-                )}
                 <button
                   className="save-button"
                   onClick={handleSave}
-                  disabled={isSaving}
+                  disabled={isSaving || !isDirty}
                 >
                   <Save className="w-4 h-4" />
                   {isSaving ? "Saving..." : "Save"}

@@ -26,6 +26,9 @@ export const tauriBackend: StorageBackend = {
   createFile(path: string) {
     return invoke("create_file", { path }).then(() => undefined);
   },
+  createFolder(path: string) {
+    return invoke("create_folder", { path }).then(() => undefined);
+  },
   searchDirectory(path: string, query: string) {
     return invoke<FileEntry[]>("search_directory", { path, query });
   },

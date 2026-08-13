@@ -8,7 +8,7 @@ import TerminalPane from "./components/TerminalPane";
 import { storage } from "./storage";
 import { displayRelativePath } from "./utils/paths";
 import { computeLineDiff, diffStats } from "./utils/diff";
-import { FileCode, Loader2, X, AlertCircle, RefreshCw, Copy, Type, ChevronLeft } from "lucide-react";
+import { FileCode, Loader2, X, AlertCircle, RefreshCw, Copy, FileText, ChevronLeft, Diff, CheckCircle } from "lucide-react";
 
 // True for the desktop (Tauri) build; false for the static web / Dropbox build.
 const isDesktop = storage.id === "tauri";
@@ -35,6 +35,11 @@ export default function App() {
   });
   const [filesData, setFilesData] = useState<Record<string, { savedContent: string, currentContent: string }>>({});
   const [isLoadingFile, setIsLoadingFile] = useState(false);
+  // Transient "just saved" flash shown in the tabs bar (a slot that already
+  // appears/disappears based on dirty state, so this reuses layout space
+  // instead of shifting anything, unlike the old inline "Saved" label that
+  // used to live in the editor's save-status row).
+  const [justSaved, setJustSaved] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
   const [draggedTab, setDraggedTab] = useState<string | null>(null);
 
@@ -81,6 +86,16 @@ export default function App() {
     if (!showDiff || !confirmDialog?.diff) return null;
     return computeLineDiff(confirmDialog.diff.savedContent, confirmDialog.diff.currentContent);
   }, [showDiff, confirmDialog]);
+
+  // Standalone "view changes" modal for the currently open file (separate from
+  // the close/quit confirmation dialog's diff panel above).
+  const [diffViewOpen, setDiffViewOpen] = useState(false);
+  const currentFileData = selectedFile ? filesData[selectedFile] : undefined;
+  const currentFileIsDirty = !!currentFileData && currentFileData.savedContent !== currentFileData.currentContent;
+  const diffViewLines = useMemo(() => {
+    if (!diffViewOpen || !currentFileData) return null;
+    return computeLineDiff(currentFileData.savedContent, currentFileData.currentContent);
+  }, [diffViewOpen, currentFileData]);
 
   const filesDataRef = useRef(filesData);
   useEffect(() => {
@@ -189,17 +204,19 @@ export default function App() {
     isDir: boolean;
   }
 
-  // Pinned workspaces are shared with the CLI/TUI via the mdcmd config file.
-  const [pinnedWorkspaces, setPinnedWorkspaces] = useState<PinnedItem[]>([]);
-  const [workspacesLoaded, setWorkspacesLoaded] = useState(false);
+  // Pinned shortcuts are shared with the CLI/TUI via the mdcmd config file
+  // (stored there, and in the storage/Tauri API, as "workspaces" for
+  // backward compatibility — only the UI-facing name changed).
+  const [pinnedShortcuts, setPinnedShortcuts] = useState<PinnedItem[]>([]);
+  const [shortcutsLoaded, setShortcutsLoaded] = useState(false);
 
-  // Load workspaces from the shared config on mount, migrating any legacy
-  // localStorage workspaces into the shared config on first run.
+  // Load shortcuts from the shared config on mount, migrating any legacy
+  // localStorage shortcuts into the shared config on first run.
   //
-  // On iOS the pinned workspaces are folders reached through the native document
+  // On iOS the pinned shortcuts are folders reached through the native document
   // picker; their access is granted via security-scoped bookmarks that must be
   // re-activated on each launch. Do that first so listing a restored folder
-  // works, then load the workspaces.
+  // works, then load the shortcuts.
   useEffect(() => {
     Promise.resolve(storage.restoreAccess?.())
       .catch((err) => console.error("Failed to restore folder access:", err))
@@ -215,7 +232,7 @@ export default function App() {
                 typeof item === "string" ? { path: item, isDir: true } : item
               );
               if (migrated.length > 0) {
-                setPinnedWorkspaces(migrated);
+                setPinnedShortcuts(migrated);
                 localStorage.removeItem("tauri-markdown-workspaces");
                 return;
               }
@@ -224,28 +241,28 @@ export default function App() {
             // ignore malformed legacy data
           }
         }
-        setPinnedWorkspaces(items);
+        setPinnedShortcuts(items);
       })
-      .catch((err) => console.error("Failed to load workspaces:", err))
-      .finally(() => setWorkspacesLoaded(true));
+      .catch((err) => console.error("Failed to load shortcuts:", err))
+      .finally(() => setShortcutsLoaded(true));
       });
   }, []);
 
-  // Persist workspaces back to the shared config whenever they change.
+  // Persist shortcuts back to the shared config whenever they change.
   useEffect(() => {
-    if (!workspacesLoaded) return;
-    storage.writeWorkspaces(pinnedWorkspaces).catch((err) =>
-      console.error("Failed to save workspaces:", err)
+    if (!shortcutsLoaded) return;
+    storage.writeWorkspaces(pinnedShortcuts).catch((err) =>
+      console.error("Failed to save shortcuts:", err)
     );
-  }, [pinnedWorkspaces, workspacesLoaded]);
+  }, [pinnedShortcuts, shortcutsLoaded]);
 
   const sortedPinned = useMemo(() => {
-    return [...pinnedWorkspaces].sort((a, b) => {
+    return [...pinnedShortcuts].sort((a, b) => {
       if (a.isDir && !b.isDir) return 1;
       if (!a.isDir && b.isDir) return -1;
       return a.path.localeCompare(b.path);
     });
-  }, [pinnedWorkspaces]);
+  }, [pinnedShortcuts]);
 
   const [viewMode, setViewMode] = useState<"list" | "tree">(() => {
     try {
@@ -438,6 +455,32 @@ export default function App() {
     return path.substring(path.lastIndexOf(separator) + 1);
   };
 
+  const getParentFolderName = (path: string) => {
+    const isWindows = path.includes("\\");
+    const separator = isWindows ? "\\" : "/";
+    const trimmed = path.slice(0, path.lastIndexOf(separator));
+    return getFileName(trimmed);
+  };
+
+  // Tab labels: bare file name, except when two or more open tabs share the
+  // same name, in which case those tabs are prefixed with their parent
+  // folder name so e.g. two "TODO.md" tabs read as "chemistry/TODO.md" and
+  // "physics/TODO.md" instead of being indistinguishable.
+  const tabLabels = useMemo(() => {
+    const nameCounts: Record<string, number> = {};
+    openTabs.forEach((path) => {
+      const name = getFileName(path);
+      nameCounts[name] = (nameCounts[name] || 0) + 1;
+    });
+    const labels: Record<string, string> = {};
+    openTabs.forEach((path) => {
+      const name = getFileName(path);
+      labels[path] = nameCounts[name] > 1 ? `${getParentFolderName(path)}/${name}` : name;
+    });
+    return labels;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openTabs]);
+
   // Copy text (path or name) of the active file to the clipboard
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
   const copyToClipboard = async (text: string, label: string) => {
@@ -450,6 +493,12 @@ export default function App() {
     }
   };
 
+  // Flash the "Saved" indicator in the tabs bar for a couple seconds.
+  const flashSaved = () => {
+    setJustSaved(true);
+    setTimeout(() => setJustSaved(false), 2000);
+  };
+
   // Write content back to the local file
   const handleSaveFile = async (filePath: string, content: string) => {
     try {
@@ -458,6 +507,7 @@ export default function App() {
         ...prev,
         [filePath]: { savedContent: content, currentContent: content }
       }));
+      flashSaved();
     } catch (err) {
       alert(`Error saving file: ${err}`);
       throw err;
@@ -493,6 +543,7 @@ export default function App() {
         });
         return next;
       });
+      flashSaved();
     } catch (err) {
       alert(`Error saving all files: ${err}`);
     }
@@ -598,7 +649,7 @@ export default function App() {
     return () => window.removeEventListener("keydown", handleGlobalKeyDown, true);
   }, [openTabs, selectedFile]);
 
-  // Keyboard shortcuts Cmd-1..9 (tabs) and Cmd-Shift-1..9 (workspaces)
+  // Keybindings Cmd-1..9 (tabs) and Cmd-Shift-1..9 (pinned shortcuts)
   useEffect(() => {
     const handleNumberShortcuts = (e: KeyboardEvent) => {
       const isCmd = e.metaKey || e.ctrlKey;
@@ -716,8 +767,8 @@ export default function App() {
         selectedFile={selectedFile}
         onSelectFile={handleSelectFile}
         width={sidebarWidth}
-        pinnedWorkspaces={pinnedWorkspaces}
-        setPinnedWorkspaces={setPinnedWorkspaces}
+        pinnedShortcuts={pinnedShortcuts}
+        setPinnedShortcuts={setPinnedShortcuts}
         sortedPinned={sortedPinned}
         viewMode={viewMode}
         setViewMode={setViewMode}
@@ -772,7 +823,7 @@ export default function App() {
           <div className="tabs-container">
             <div className="tabs-bar">
               {openTabs.map((path) => {
-                const name = getFileName(path);
+                const name = tabLabels[path] ?? getFileName(path);
                 const isActive = selectedFile === path;
                 const isDirty = filesData[path] ? filesData[path].savedContent !== filesData[path].currentContent : false;
                 return (
@@ -801,7 +852,7 @@ export default function App() {
                 );
               })}
             </div>
-            {Object.values(filesData).some(d => d.savedContent !== d.currentContent) && (
+            {Object.values(filesData).some(d => d.savedContent !== d.currentContent) ? (
               <button
                 className="save-all-btn"
                 onClick={handleSaveAll}
@@ -809,7 +860,11 @@ export default function App() {
               >
                 Save All
               </button>
-            )}
+            ) : justSaved ? (
+              <span style={{ color: "hsl(142, 71%, 45%)", display: "flex", alignItems: "center", gap: "4px", fontSize: "13px", padding: "0 8px" }}>
+                <CheckCircle className="w-4 h-4" /> Saved
+              </span>
+            ) : null}
             {selectedFile && (
               <div className="tab-copy-actions">
                 {copyFeedback && <span className="copy-feedback">{copyFeedback}</span>}
@@ -818,7 +873,7 @@ export default function App() {
                   onClick={() => copyToClipboard(getFileName(selectedFile), "name")}
                   title="Copy file name"
                 >
-                  <Type className="w-3.5 h-3.5" />
+                  <FileText className="w-3.5 h-3.5" />
                 </button>
                 <button
                   className="tab-copy-btn"
@@ -827,6 +882,15 @@ export default function App() {
                 >
                   <Copy className="w-3.5 h-3.5" />
                 </button>
+                {currentFileIsDirty && (
+                  <button
+                    className="tab-copy-btn"
+                    onClick={() => setDiffViewOpen(true)}
+                    title="View changes since last save"
+                  >
+                    <Diff className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -856,17 +920,18 @@ export default function App() {
               <MarkdownEditor
                 key={selectedFile}
                 filePath={selectedFile}
-                pathLabel={displayRelativePath(selectedFile, pinnedWorkspaces)}
+                pathLabel={displayRelativePath(selectedFile, pinnedShortcuts)}
                 initialContent={filesData[selectedFile]?.currentContent || ""}
+                isDirty={filesData[selectedFile]?.savedContent !== filesData[selectedFile]?.currentContent}
                 onSave={handleSaveFile}
                 onChange={handleContentChange}
                 onOpenFile={handleSelectFile}
-                isPinned={pinnedWorkspaces.some((p) => p.path === selectedFile)}
+                isPinned={pinnedShortcuts.some((p) => p.path === selectedFile)}
                 onTogglePin={() => {
-                  setPinnedWorkspaces(
-                    pinnedWorkspaces.some((p) => p.path === selectedFile)
-                      ? pinnedWorkspaces.filter((p) => p.path !== selectedFile)
-                      : [...pinnedWorkspaces, { path: selectedFile, isDir: false }]
+                  setPinnedShortcuts(
+                    pinnedShortcuts.some((p) => p.path === selectedFile)
+                      ? pinnedShortcuts.filter((p) => p.path !== selectedFile)
+                      : [...pinnedShortcuts, { path: selectedFile, isDir: false }]
                   );
                 }}
               />
@@ -983,6 +1048,36 @@ export default function App() {
                   Cancel
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Standalone "view changes" modal for the current file */}
+      {diffViewOpen && currentFileData && (
+        <div className="confirm-modal-overlay" onClick={() => setDiffViewOpen(false)}>
+          <div className="confirm-modal with-diff" onClick={(e) => e.stopPropagation()}>
+            <h3>Changes since last save</h3>
+            <div className="confirm-diff-section">
+              <div className="confirm-diff-view">
+                {diffViewLines && diffViewLines.length === 0 ? (
+                  <div className="diff-empty">No line changes</div>
+                ) : (
+                  diffViewLines?.map((line, idx) => (
+                    <div key={idx} className={`diff-line diff-${line.type}`}>
+                      <span className="diff-gutter">
+                        {line.type === "add" ? "+" : line.type === "del" ? "−" : " "}
+                      </span>
+                      <span className="diff-text">{line.text || " "}</span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+            <div className="confirm-modal-actions">
+              <button className="confirm-btn-primary" onClick={() => setDiffViewOpen(false)}>
+                Close
+              </button>
             </div>
           </div>
         </div>
