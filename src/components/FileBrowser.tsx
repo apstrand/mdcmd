@@ -637,7 +637,7 @@ export default function FileBrowser({
   const handleDisconnect = (id: WebProviderId, label: string) => {
     if (!window.confirm(`Disconnect ${label}? You can reconnect at any time.`)) return;
     disconnectProvider(id);
-    setPinnedWorkspaces(pinnedWorkspaces.filter((p) => !p.path.startsWith(`/${id}`)));
+    setPinnedShortcuts(pinnedShortcuts.filter((p) => !p.path.startsWith(`/${id}`)));
     if (currentPath.startsWith(`/${id}`)) setCurrentPath("/");
     setReloadToken((t) => t + 1);
   };

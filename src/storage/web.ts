@@ -160,6 +160,12 @@ export const webBackend: StorageBackend = {
     return provider.backend.createFile(rest);
   },
 
+  async createFolder(path: string) {
+    const { provider, rest } = route(path);
+    if (!provider) throw new Error(`Cannot create a folder here: ${path}`);
+    return provider.backend.createFolder(rest);
+  },
+
   async searchDirectory(path: string, query: string) {
     const { provider, rest } = route(path);
     // Searching at the root (across providers) isn't supported.
