@@ -776,6 +776,32 @@ body {
   min-height: 100%;
 }
 
+/* Reading themes for rendered markdown (".editor-wrapper[data-content-theme]").
+   "reading" favors long-form prose (essays): serif type, a narrower measure,
+   and generous line spacing. "clarity" favors technical docs: a wider
+   measure and tight, plain sans-serif for scanning code and structure. */
+.editor-wrapper[data-content-theme="reading"] {
+  max-width: 640px;
+}
+
+.editor-wrapper[data-content-theme="reading"] .ProseMirror {
+  font-family: Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+  line-height: 1.75;
+}
+
+.editor-wrapper[data-content-theme="reading"] .ProseMirror p {
+  margin-bottom: 1.4em;
+}
+
+.editor-wrapper[data-content-theme="clarity"] {
+  max-width: 980px;
+}
+
+.editor-wrapper[data-content-theme="clarity"] .ProseMirror {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.5;
+}
+
 /* ProseMirror Markdown styling */
 .ProseMirror {
   outline: none;

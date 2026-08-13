@@ -33,12 +33,14 @@ import {
   ZoomIn,
   ZoomOut,
   Pin,
+  BookOpen,
 } from "lucide-react";
 
 const ZOOM_MIN = 0.6;
 const ZOOM_MAX = 2.5;
 const ZOOM_STEP = 0.1;
 const ZOOM_STORAGE_KEY = "mdcmd-editor-zoom";
+const CONTENT_THEME_STORAGE_KEY = "mdcmd-content-theme";
 
 const clampZoom = (z: number) =>
   Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 10) / 10));
@@ -213,6 +215,25 @@ export default function MarkdownEditor({
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [editMode, setEditMode] = useState<"rich" | "plain">("rich");
+
+  // Reading theme for rendered markdown: "reading" favors long-form prose
+  // (serif, narrower measure), "clarity" favors technical docs (wider, tight
+  // sans-serif). Shared across files and persisted like zoom.
+  const [contentTheme, setContentTheme] = useState<"default" | "reading" | "clarity">(() => {
+    try {
+      const saved = localStorage.getItem(CONTENT_THEME_STORAGE_KEY);
+      return saved === "reading" || saved === "clarity" ? saved : "default";
+    } catch {
+      return "default";
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(CONTENT_THEME_STORAGE_KEY, contentTheme);
+    } catch {
+      // ignore storage errors (e.g. private browsing)
+    }
+  }, [contentTheme]);
 
   // Zoom level for the markdown/plain content area. Shared across files and
   // persisted so it survives reopening a file or restarting the app.
@@ -812,6 +833,34 @@ export default function MarkdownEditor({
             </div>
           )}
 
+          {isMarkdown && editMode === "rich" && (
+            <div
+              className="theme-select-container"
+              style={{ display: "flex", alignItems: "center", gap: "5px", marginLeft: "10px" }}
+              title="Reading theme for rendered markdown"
+            >
+              <BookOpen className="w-3.5 h-3.5" style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
+              <select
+                value={contentTheme}
+                onChange={(e) => setContentTheme(e.target.value as "default" | "reading" | "clarity")}
+                style={{
+                  fontSize: "12px",
+                  fontWeight: 500,
+                  borderRadius: "4px",
+                  border: "1px solid var(--border)",
+                  backgroundColor: "var(--bg-tertiary)",
+                  color: "var(--text-primary)",
+                  padding: "4px 6px",
+                  cursor: "pointer",
+                }}
+              >
+                <option value="default">Default</option>
+                <option value="reading">Reading</option>
+                <option value="clarity">Clarity</option>
+              </select>
+            </div>
+          )}
+
           <div className="zoom-controls" title="Zoom (Cmd/Ctrl +/-/0, Cmd/Ctrl + scroll)">
             <button className="zoom-btn" onClick={zoomOut} title="Zoom out" aria-label="Zoom out">
               <ZoomOut className="w-4 h-4" />
@@ -1070,7 +1119,7 @@ export default function MarkdownEditor({
         onScroll={(e) => rememberScroll(e.currentTarget.scrollTop)}
         style={{ ["--editor-zoom" as any]: zoom }}
       >
-        <div className="editor-wrapper">
+        <div className="editor-wrapper" data-content-theme={contentTheme}>
           {isMarkdown && editMode === "rich" ? (
             <EditorContent editor={editor} />
           ) : (
