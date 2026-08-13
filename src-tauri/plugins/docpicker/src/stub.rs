@@ -18,6 +18,10 @@ impl<R: Runtime> Docpicker<R> {
     Err(crate::Error::Unsupported)
   }
 
+  pub fn pick_file(&self) -> crate::Result<Option<PickedFolder>> {
+    Err(crate::Error::Unsupported)
+  }
+
   /// No bookmarks to restore off-iOS; report an empty set rather than erroring
   /// so a shared startup path can call this unconditionally.
   pub fn restore_access(&self) -> crate::Result<Vec<String>> {

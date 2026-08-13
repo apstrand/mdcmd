@@ -41,6 +41,14 @@ async fn pick_folder<R: Runtime>(app: AppHandle<R>) -> Result<Option<PickedFolde
   app.docpicker().pick_folder()
 }
 
+/// Present the native single-file picker. Reaches cloud providers (Dropbox,
+/// Google Drive, iCloud Drive) that don't allow folder selection. Resolves to
+/// the picked file, or `None` when the user cancels.
+#[tauri::command]
+async fn pick_file<R: Runtime>(app: AppHandle<R>) -> Result<Option<PickedFolder>> {
+  app.docpicker().pick_file()
+}
+
 /// Re-activate every saved security-scoped bookmark so previously-picked folders
 /// are readable again after an app relaunch. Returns the paths now accessible.
 #[tauri::command]
@@ -59,6 +67,7 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
   Builder::new("docpicker")
     .invoke_handler(tauri::generate_handler![
       pick_folder,
+      pick_file,
       restore_access,
       release_folder
     ])

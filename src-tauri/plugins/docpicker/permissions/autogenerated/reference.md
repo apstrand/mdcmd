@@ -1,10 +1,11 @@
 ## Default Permission
 
-Allows picking folders and restoring/releasing their access.
+Allows picking folders and files and restoring/releasing their access.
 
 #### This default permission set includes the following:
 
 - `allow-pick-folder`
+- `allow-pick-file`
 - `allow-restore-access`
 - `allow-release-folder`
 
@@ -16,6 +17,32 @@ Allows picking folders and restoring/releasing their access.
 <th>Description</th>
 </tr>
 
+
+<tr>
+<td>
+
+`docpicker:allow-pick-file`
+
+</td>
+<td>
+
+Enables the pick_file command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`docpicker:deny-pick-file`
+
+</td>
+<td>
+
+Denies the pick_file command without any pre-configured scope.
+
+</td>
+</tr>
 
 <tr>
 <td>

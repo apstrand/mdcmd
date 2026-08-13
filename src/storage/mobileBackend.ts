@@ -24,6 +24,9 @@ export const mobileBackend: StorageBackend = {
   pickFolder() {
     return invoke<PickedFolder | null>("plugin:docpicker|pick_folder");
   },
+  pickFile() {
+    return invoke<PickedFolder | null>("plugin:docpicker|pick_file");
+  },
   restoreAccess() {
     return invoke<string[]>("plugin:docpicker|restore_access");
   },

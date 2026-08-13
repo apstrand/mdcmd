@@ -661,6 +661,26 @@ export default function FileBrowser({
     }
   };
 
+  // Pick a single file via the native document picker (iOS) and pin it as a
+  // file workspace, then open it. Reaches cloud providers (iCloud Drive,
+  // Dropbox, Google Drive) that don't allow folder selection.
+  const [isPickingFile, setIsPickingFile] = useState(false);
+  const handleAddFile = async () => {
+    if (!storage.pickFile) return;
+    setIsPickingFile(true);
+    try {
+      const file = await storage.pickFile();
+      if (file) {
+        handlePin(file.path, false);
+        onSelectFile(file.path);
+      }
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setIsPickingFile(false);
+    }
+  };
+
   // Open terminal at path
   const handleOpenTerminal = () => {
     if (!currentPath) return;
@@ -1596,24 +1616,44 @@ export default function FileBrowser({
             <span>Shortcuts</span>
           </span>
           {storage.capabilities.documentPicker && (
-            <button
-              className="file-action-btn"
-              tabIndex={-1}
-              disabled={isPicking}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={(e) => {
-                e.stopPropagation();
-                handleAddFolder();
-              }}
-              title="Add a folder from Files / iCloud Drive"
-              style={{ opacity: 0.8 }}
-            >
-              {isPicking ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <FolderPlus className="w-3.5 h-3.5" />
-              )}
-            </button>
+            <span style={{ display: "flex", gap: "2px" }}>
+              <button
+                className="file-action-btn"
+                tabIndex={-1}
+                disabled={isPickingFile}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleAddFile();
+                }}
+                title="Add a file from Files / iCloud / Dropbox"
+                style={{ opacity: 0.8 }}
+              >
+                {isPickingFile ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <FilePlus className="w-3.5 h-3.5" />
+                )}
+              </button>
+              <button
+                className="file-action-btn"
+                tabIndex={-1}
+                disabled={isPicking}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleAddFolder();
+                }}
+                title="Add a folder from Files / iCloud Drive"
+                style={{ opacity: 0.8 }}
+              >
+                {isPicking ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <FolderPlus className="w-3.5 h-3.5" />
+                )}
+              </button>
+            </span>
           )}
         </div>
         <div className="sidebar-scroll-content">

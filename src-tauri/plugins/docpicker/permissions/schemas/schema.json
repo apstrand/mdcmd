@@ -295,6 +295,18 @@
       "type": "string",
       "oneOf": [
         {
+          "description": "Enables the pick_file command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-pick-file",
+          "markdownDescription": "Enables the pick_file command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the pick_file command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-pick-file",
+          "markdownDescription": "Denies the pick_file command without any pre-configured scope."
+        },
+        {
           "description": "Enables the pick_folder command without any pre-configured scope.",
           "type": "string",
           "const": "allow-pick-folder",
@@ -331,10 +343,10 @@
           "markdownDescription": "Denies the restore_access command without any pre-configured scope."
         },
         {
-          "description": "Allows picking folders and restoring/releasing their access.\n#### This default permission set includes:\n\n- `allow-pick-folder`\n- `allow-restore-access`\n- `allow-release-folder`",
+          "description": "Allows picking folders and files and restoring/releasing their access.\n#### This default permission set includes:\n\n- `allow-pick-folder`\n- `allow-pick-file`\n- `allow-restore-access`\n- `allow-release-folder`",
           "type": "string",
           "const": "default",
-          "markdownDescription": "Allows picking folders and restoring/releasing their access.\n#### This default permission set includes:\n\n- `allow-pick-folder`\n- `allow-restore-access`\n- `allow-release-folder`"
+          "markdownDescription": "Allows picking folders and files and restoring/releasing their access.\n#### This default permission set includes:\n\n- `allow-pick-folder`\n- `allow-pick-file`\n- `allow-restore-access`\n- `allow-release-folder`"
         }
       ]
     }

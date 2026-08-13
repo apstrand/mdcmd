@@ -25,6 +25,11 @@ impl<R: Runtime> Docpicker<R> {
     Ok(res.folder)
   }
 
+  pub fn pick_file(&self) -> crate::Result<Option<PickedFolder>> {
+    let res: PickFolderResponse = self.0.run_mobile_plugin("pickFile", ())?;
+    Ok(res.folder)
+  }
+
   pub fn restore_access(&self) -> crate::Result<Vec<String>> {
     let res: RestoreResponse = self.0.run_mobile_plugin("restoreAccess", ())?;
     Ok(res.paths)

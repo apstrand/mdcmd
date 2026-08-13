@@ -79,6 +79,13 @@ export interface StorageBackend {
    */
   pickFolder?(): Promise<PickedFolder | null>;
   /**
+   * Present the native single-file picker (iOS). Resolves to the picked file,
+   * or `null` if the user cancels. Reaches cloud providers (iCloud Drive,
+   * Dropbox, Google Drive) that don't allow folder selection. Only present when
+   * `capabilities.documentPicker`.
+   */
+  pickFile?(): Promise<PickedFolder | null>;
+  /**
    * Re-activate saved folder bookmarks so previously-picked folders are readable
    * again after an app relaunch. Returns the paths now accessible. Call before
    * the first directory listing on startup.

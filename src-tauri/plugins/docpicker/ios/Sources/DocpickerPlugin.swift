@@ -56,6 +56,45 @@ class DocpickerPlugin: Plugin, UIDocumentPickerDelegate {
     }
   }
 
+  /// Present the file picker (single file). Reaches every Files "Location",
+  /// including third-party cloud providers (Dropbox, Google Drive) that don't
+  /// allow folder selection. Resolves the same `{ folder: { path, name } }`
+  /// shape as `pickFolder` (path + bookmark are identical for a file).
+  @objc public func pickFile(_ invoke: Invoke) {
+    DispatchQueue.main.async {
+      if let stale = self.pendingInvoke {
+        stale.resolve(["folder": NSNull()])
+      }
+      self.pendingInvoke = invoke
+
+      let picker: UIDocumentPickerViewController
+      if #available(iOS 14.0, *) {
+        // Prefer text/markdown, but keep broad fallbacks so nothing a user
+        // expects (.md/.markdown/.qmd/.txt and other text notes) is greyed out.
+        var types: [UTType] = [.plainText, .text]
+        if let md = UTType("net.daringfireball.markdown") {
+          types.insert(md, at: 0)
+        }
+        types.append(.data)
+        picker = UIDocumentPickerViewController(
+          forOpeningContentTypes: types, asCopy: false)
+      } else {
+        picker = UIDocumentPickerViewController(
+          documentTypes: [kUTTypeText as String, kUTTypeData as String], in: .open)
+      }
+      picker.delegate = self
+      picker.allowsMultipleSelection = false
+      picker.modalPresentationStyle = .fullScreen
+
+      guard let top = self.topViewController() else {
+        self.pendingInvoke = nil
+        invoke.reject("No view controller available to present the picker")
+        return
+      }
+      top.present(picker, animated: true, completion: nil)
+    }
+  }
+
   /// Re-activate every saved bookmark (picked folders and opened files) so they
   /// are readable again after relaunch. Resolves `{ paths: [String] }`.
   @objc public func restoreAccess(_ invoke: Invoke) {
