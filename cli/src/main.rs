@@ -45,10 +45,31 @@ fn debug_image() {
         "KONSOLE_VERSION",
         "SSH_TTY",
         "SSH_CONNECTION",
+        "TMUX",
+        "TMUX_PANE",
     ]
     .map(|name| (name, std::env::var(name)))
     {
         println!("{name}={val:?}");
+    }
+
+    println!("is_tmux={:?}", termquery::is_tmux());
+    if let Ok(pane) = std::env::var("TMUX_PANE") {
+        let allow_passthrough = std::process::Command::new("tmux")
+            .args(["show-options", "-p", "-t", &pane, "-v", "allow-passthrough"])
+            .output();
+        match allow_passthrough {
+            Ok(out) => println!(
+                "tmux_allow_passthrough={:?}",
+                String::from_utf8_lossy(&out.stdout).trim()
+            ),
+            Err(e) => println!("tmux_allow_passthrough query failed: {e:?}"),
+        }
+        let version = std::process::Command::new("tmux").arg("-V").output();
+        match version {
+            Ok(out) => println!("tmux_version={:?}", String::from_utf8_lossy(&out.stdout).trim()),
+            Err(e) => println!("tmux_version query failed: {e:?}"),
+        }
     }
 
     let raw_was_enabled = enable_raw_mode().is_ok();
@@ -136,12 +157,58 @@ fn main() -> Result<()> {
 
     let mut app = AppState::new(initial_path);
 
+    // tmux's `allow-passthrough` forwards escape sequences straight to the
+    // real terminal without first syncing its cursor to tmux's pane-relative
+    // position, so an image transmitted in the same flush as the cursor move
+    // that positions it can land at the wrong spot (often (0,0)) or not show
+    // up at all. Only relevant when actually running inside tmux, so this is
+    // resolved once up front rather than re-checked every frame.
+    let in_tmux = termquery::is_tmux();
+    // Overridable for diagnosis: over SSH the gap has to cover tmux relaying
+    // through the outer ssh session to the real (remote) terminal, not just
+    // tmux's own local processing, so the right value may be much larger
+    // than what a bare local tmux setup needs. Try e.g.
+    // `MDCMD_TMUX_IMAGE_DELAY_MS=50 mdc` if images are still misplaced.
+    let tmux_image_delay = std::env::var("MDCMD_TMUX_IMAGE_DELAY_MS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .map(Duration::from_millis)
+        .unwrap_or(Duration::from_millis(2));
+    let trace_tmux_images = std::env::var("MDCMD_DEBUG_TMUX_IMAGES").is_ok();
+    let mut last_image_signature = None;
+
     while !app.quit {
         if app.needs_clear {
             terminal.clear()?;
             app.needs_clear = false;
         }
         app.poll_fs_events();
+
+        if in_tmux {
+            let has_image = app.image_protocol.is_some() || !app.image_blocks.is_empty();
+            let signature = (
+                app.selected_file.clone(),
+                app.scroll_offset,
+                app.last_content_area,
+                app.fullscreen,
+            );
+            if has_image && last_image_signature.as_ref() != Some(&signature) {
+                // Draw once with images suppressed to settle the surrounding
+                // layout and cursor state, flush, give tmux a moment to relay
+                // that to the real terminal, then draw again with the image
+                // included so only its cells actually hit the wire this
+                // time. Same underlying bug (and fix) as
+                // https://github.com/sxyazi/yazi/issues/1064.
+                if trace_tmux_images {
+                    eprintln!("[tmux-images] resync: signature={signature:?} delay={tmux_image_delay:?}\r");
+                }
+                app.suppress_images_this_frame = true;
+                terminal.draw(|f| app.draw(f))?;
+                app.suppress_images_this_frame = false;
+                std::thread::sleep(tmux_image_delay);
+                last_image_signature = Some(signature);
+            }
+        }
         terminal.draw(|f| app.draw(f))?;
 
         // An inline editor session needs to redraw promptly as the child

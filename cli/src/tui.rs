@@ -163,6 +163,12 @@ pub struct AppState {
     watcher: Option<notify::RecommendedWatcher>,
     watch_rx: Option<std::sync::mpsc::Receiver<notify::Result<notify::Event>>>,
     watched_dir: Option<PathBuf>,
+    /// When set, `draw` skips rendering image widgets entirely (everything
+    /// else draws normally). Used by the tmux image-positioning workaround
+    /// in `main.rs`: it draws once with this set to settle layout/cursor
+    /// state, flushes, waits briefly, then draws again with it cleared so
+    /// only the image's cells actually hit the wire on that second write.
+    pub suppress_images_this_frame: bool,
 }
 
 
@@ -267,6 +273,7 @@ impl AppState {
             watcher: None,
             watch_rx: None,
             watched_dir: None,
+            suppress_images_this_frame: false,
         };
 
         app.reload_directory();
@@ -2448,8 +2455,10 @@ impl AppState {
                 if !is_video && self.image_protocol.is_some() {
                     let inner = viewer_block.inner(content_area);
                     f.render_widget(viewer_block, content_area);
-                    if let Some(protocol) = self.image_protocol.as_mut() {
-                        f.render_stateful_widget(StatefulImage::new().resize(Resize::Fit(None)), inner, protocol);
+                    if !self.suppress_images_this_frame {
+                        if let Some(protocol) = self.image_protocol.as_mut() {
+                            f.render_stateful_widget(StatefulImage::new().resize(Resize::Fit(None)), inner, protocol);
+                        }
                     }
                 } else {
                     let media_type = if is_video { "Video" } else { "Image" };
@@ -2627,7 +2636,7 @@ impl AppState {
     /// a partially-scrolled image is cropped to just its visible rows
     /// (rather than being resized-to-fit and looking squished).
     fn render_inline_images(&mut self, f: &mut Frame<'_>, text: &Text<'static>, inner: Rect) {
-        if self.image_blocks.is_empty() || inner.width == 0 || inner.height == 0 {
+        if self.suppress_images_this_frame || self.image_blocks.is_empty() || inner.width == 0 || inner.height == 0 {
             return;
         }
         let wrap_width = inner.width;
@@ -2683,12 +2692,14 @@ impl AppState {
 
         if is_media_file(&path_str) {
             let is_video = is_video_file(&title);
-            if !is_video {
-                if let Some(protocol) = self.image_protocol.as_mut() {
+            if !is_video && self.image_protocol.is_some() {
+                if !self.suppress_images_this_frame {
                     let inner = block.inner(area);
-                    f.render_stateful_widget(StatefulImage::new().resize(Resize::Fit(None)), inner, protocol);
-                    return;
+                    if let Some(protocol) = self.image_protocol.as_mut() {
+                        f.render_stateful_widget(StatefulImage::new().resize(Resize::Fit(None)), inner, protocol);
+                    }
                 }
+                return;
             }
             let media_type = if is_video { "Video" } else { "Image" };
             let media_lines = vec![
