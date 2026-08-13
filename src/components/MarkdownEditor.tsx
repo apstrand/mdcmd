@@ -619,9 +619,13 @@ export default function MarkdownEditor({
     setEditMode(mode);
   };
 
-  // Intercept Shift+Tab to focus the sidebar folder view
+  // Intercept Shift+Tab to focus the sidebar folder view — but only when it
+  // wouldn't otherwise outdent a list item, so list formatting still works.
   const handleKeyDownCapture = (e: React.KeyboardEvent) => {
     if (e.key === "Tab" && e.shiftKey) {
+      if (editor?.can().liftListItem("listItem") || editor?.can().liftListItem("taskItem")) {
+        return;
+      }
       e.preventDefault();
       e.stopPropagation();
       (document.querySelector(".sidebar") as HTMLElement)?.focus();
