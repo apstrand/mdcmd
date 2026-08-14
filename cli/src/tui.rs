@@ -1609,15 +1609,23 @@ impl AppState {
                 }
             }
             KeyCode::Right | KeyCode::Char('l') => {
+                let has_modifier = key.modifiers.contains(KeyModifiers::SUPER)
+                    || key.modifiers.contains(KeyModifiers::ALT)
+                    || key.modifiers.contains(KeyModifiers::META);
                 match self.view_mode {
                     ViewMode::List => {
                         if !self.entries.is_empty() {
-                            let entry = &self.entries[self.folder_index];
+                            let entry = self.entries[self.folder_index].clone();
+                            let path = PathBuf::from(&entry.path);
                             if entry.is_dir {
-                                let path = PathBuf::from(&entry.path);
                                 self.current_dir = path;
                                 self.reload_directory();
                                 self.folder_index = 0;
+                            } else {
+                                self.select_file(path);
+                                if has_modifier {
+                                    self.active_section = ActiveSection::Viewer;
+                                }
                             }
                         }
                     }
@@ -1625,8 +1633,15 @@ impl AppState {
                         let flat_tree = self.get_flat_tree();
                         if !flat_tree.is_empty() {
                             let node = &flat_tree[self.folder_index];
-                            if node.is_dir && !self.expanded_paths.contains(&node.path) {
-                                self.expanded_paths.insert(node.path.clone());
+                            if node.is_dir {
+                                if !self.expanded_paths.contains(&node.path) {
+                                    self.expanded_paths.insert(node.path.clone());
+                                }
+                            } else {
+                                self.select_file(node.path.clone());
+                                if has_modifier {
+                                    self.active_section = ActiveSection::Viewer;
+                                }
                             }
                         }
                     }
