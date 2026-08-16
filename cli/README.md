@@ -18,6 +18,9 @@ Markdown editor, built with [ratatui](https://ratatui.rs) and
   automatically.
 - **Markdown preview** — render `.md` files directly in the terminal with styled
   headings, code blocks, and inline formatting. Media files are recognized too.
+  `[text](url)` links are clickable in terminals that support OSC 8 hyperlinks
+  (kitty, WezTerm, iTerm2, foot, Windows Terminal, GNOME Terminal, Ghostty, and
+  others); terminals without support just show the styled link text.
 - **Tabs** — open multiple files at once and cycle between them.
 - **Pinned workspaces** — pin folders or files and jump straight to them; pins
   persist across sessions.

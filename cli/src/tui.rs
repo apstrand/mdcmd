@@ -4,6 +4,7 @@ use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use ratatui::{
+    buffer::CellDiffOption,
     layout::{Constraint, Direction, Layout, Rect, Size},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
@@ -118,6 +119,11 @@ pub struct AppState {
     pub file_lines_count: usize,
     pub line_map: Vec<usize>,
     pub image_blocks: Vec<InlineImage>,
+    /// Every `[text](url)` link found in the current file, in document
+    /// order, with `line` adjusted for any blank rows `load_inline_images`
+    /// spliced in ahead of it. Used post-render to make the matching
+    /// on-screen cells clickable (see `render_hyperlinks`).
+    pub links: Vec<crate::markdown::LinkRef>,
     pub scroll_offset: usize,
     pub error: Option<String>,
     pub quit: bool,
@@ -244,6 +250,7 @@ impl AppState {
             file_lines_count: 0,
             line_map: Vec::new(),
             image_blocks: Vec::new(),
+            links: Vec::new(),
             scroll_offset: 0,
             error: None,
             quit: false,
@@ -858,6 +865,7 @@ impl AppState {
             self.file_lines_count = 0;
             self.line_map = Vec::new();
             self.image_blocks = Vec::new();
+            self.links = Vec::new();
             self.scroll_offset = 0;
             self.error = None;
             return;
@@ -868,11 +876,12 @@ impl AppState {
         match fs::read_to_string(&path) {
             Ok(content) => {
                 let parsed = parse_markdown(&content, &self.palette);
-                let (text, line_map, image_blocks) = self.load_inline_images(&path, parsed);
+                let (text, line_map, image_blocks, links) = self.load_inline_images(&path, parsed);
                 self.file_lines_count = text.lines.len();
                 self.file_content = Some(text);
                 self.line_map = line_map;
                 self.image_blocks = image_blocks;
+                self.links = links;
                 // Forces a relayout on the next draw() once the real viewer
                 // width is known — `last_content_area` may still be the
                 // startup placeholder right now (e.g. a file opened via a
@@ -888,6 +897,7 @@ impl AppState {
                 self.file_lines_count = 0;
                 self.line_map = Vec::new();
                 self.image_blocks = Vec::new();
+                self.links = Vec::new();
                 self.scroll_offset = 0;
                 self.error = Some(format!("Error opening file: {}", e));
             }
@@ -903,10 +913,10 @@ impl AppState {
         &self,
         file_path: &Path,
         parsed: crate::markdown::ParsedMarkdown,
-    ) -> (Text<'static>, Vec<usize>, Vec<InlineImage>) {
-        let crate::markdown::ParsedMarkdown { mut text, images, mut line_map } = parsed;
+    ) -> (Text<'static>, Vec<usize>, Vec<InlineImage>, Vec<crate::markdown::LinkRef>) {
+        let crate::markdown::ParsedMarkdown { mut text, images, links, mut line_map } = parsed;
         if images.is_empty() {
-            return (text, line_map, Vec::new());
+            return (text, line_map, Vec::new(), links);
         }
 
         let base_dir = file_path.parent().map(Path::to_path_buf);
@@ -917,8 +927,14 @@ impl AppState {
         let font = self.image_picker.font_size();
 
         let mut image_blocks = Vec::new();
+        // (original pre-splice line, blank rows inserted there) — used below
+        // to shift `links[].line` by the same amount as any image reserved
+        // rows that landed ahead of it, since both were collected in the
+        // same original-line coordinate space by `parse_markdown`.
+        let mut inserted_at = Vec::new();
         let mut offset = 0usize;
         for img_ref in images {
+            let orig_line = img_ref.line;
             let line = img_ref.line + offset;
             let is_remote = img_ref.src.starts_with("http://") || img_ref.src.starts_with("https://");
             let resolved = if is_remote {
@@ -954,6 +970,7 @@ impl AppState {
                         line_map.insert(line + 1 + i, line_map[line]);
                     }
                     offset += blank_count;
+                    inserted_at.push((orig_line, blank_count));
                 }
 
                 let size = Size::new(avail_cols, rows);
@@ -963,7 +980,27 @@ impl AppState {
             }
         }
 
-        (text, line_map, image_blocks)
+        let links = if inserted_at.is_empty() {
+            links
+        } else {
+            let mut adjusted = Vec::with_capacity(links.len());
+            let mut offset = 0usize;
+            let mut inserted_iter = inserted_at.iter().peekable();
+            for link in links {
+                while let Some(&&(orig_line, blanks)) = inserted_iter.peek() {
+                    if orig_line < link.line {
+                        offset += blanks;
+                        inserted_iter.next();
+                    } else {
+                        break;
+                    }
+                }
+                adjusted.push(crate::markdown::LinkRef { line: link.line + offset, ..link });
+            }
+            adjusted
+        };
+
+        (text, line_map, image_blocks, links)
     }
 
     /// Re-parses the current file and re-runs `load_inline_images` against
@@ -977,11 +1014,12 @@ impl AppState {
         }
         let Ok(content) = fs::read_to_string(&file_path) else { return };
         let parsed = parse_markdown(&content, &self.palette);
-        let (text, line_map, image_blocks) = self.load_inline_images(&file_path, parsed);
+        let (text, line_map, image_blocks, links) = self.load_inline_images(&file_path, parsed);
         self.file_lines_count = text.lines.len();
         self.file_content = Some(text);
         self.line_map = line_map;
         self.image_blocks = image_blocks;
+        self.links = links;
     }
 
     pub fn close_file(&mut self, path: PathBuf) {
@@ -1000,6 +1038,7 @@ impl AppState {
                     self.file_lines_count = 0;
                     self.line_map = Vec::new();
                     self.image_blocks = Vec::new();
+                    self.links = Vec::new();
                     self.scroll_offset = 0;
                     self.error = None;
                 }
@@ -2527,6 +2566,7 @@ impl AppState {
                     .wrap(Wrap { trim: false });
                 f.render_widget(paragraph, content_area);
                 self.render_inline_images(f, &text, inner);
+                self.render_hyperlinks(f, &text, inner);
             } else {
                 let paragraph = Paragraph::new(vec![Line::from("  No content loaded.")])
                     .block(viewer_block);
@@ -2685,6 +2725,143 @@ impl AppState {
         }
     }
 
+    /// In full-width fullscreen mode (`FullscreenMode::NoMargins`), replaces
+    /// each link span's rendered text with its full `[text](url)` markdown
+    /// source instead of just the label, so the raw syntax is visible and
+    /// easy to copy-paste — that mode is for seeing everything, unlike the
+    /// narrower `Margins` mode which stays optimized for reading. The span
+    /// keeps its link style, and `render_hyperlinks` (called afterwards
+    /// with this same `text`) still makes the whole thing clickable.
+    fn expand_links_to_raw_markdown(&self, text: &mut Text<'static>) {
+        for link in &self.links {
+            if let Some(span) = text.lines.get_mut(link.line).and_then(|l| l.spans.get_mut(link.span)) {
+                span.content = format!("[{}]({})", link.text, link.url).into();
+            }
+        }
+    }
+
+    /// Makes rendered `[text](url)` links clickable in terminals that
+    /// support OSC 8 hyperlinks, by wrapping their on-screen cells with the
+    /// open/close escape sequence directly in the buffer.
+    ///
+    /// Ratatui's normal `Span`/`Paragraph` path can't carry this: `Buffer`
+    /// strips any grapheme containing a control character when writing
+    /// styled text (see `Buffer::set_stringn`), and it doesn't expose where
+    /// an inline span ends up after word-wrap. Instead this runs *after*
+    /// the paragraph has already been rendered — the same technique
+    /// `ratatui-image` uses elsewhere in this file for graphics protocols —
+    /// scanning the already-wrapped buffer for cells carrying the distinct
+    /// link style (`accent` + `UNDERLINED`, not used for anything else) and
+    /// splicing the escape sequence onto the first/last cell of each
+    /// contiguous run via `Cell::set_symbol`, which bypasses that filter.
+    ///
+    /// Runs are matched against `self.links` by document order and
+    /// character count rather than exact text, so a link label that itself
+    /// gets word-wrapped across two rows still becomes two independently
+    /// clickable runs pointing at the same URL, instead of needing wrap
+    /// positions to be predicted ahead of rendering.
+    fn render_hyperlinks(&self, f: &mut Frame<'_>, text: &Text<'static>, inner: Rect) {
+        if self.links.is_empty() || inner.width == 0 || inner.height == 0 {
+            return;
+        }
+        let wrap_width = inner.width;
+        let scroll = self.scroll_offset as i32;
+
+        let visible: Vec<&crate::markdown::LinkRef> = self
+            .links
+            .iter()
+            .filter(|link| {
+                let top = wrapped_row_offset(text, link.line, wrap_width) as i32 - scroll;
+                let bottom = wrapped_row_offset(text, link.line + 1, wrap_width) as i32 - scroll;
+                bottom > 0 && top < inner.height as i32
+            })
+            .collect();
+        if visible.is_empty() {
+            return;
+        }
+
+        let link_fg = self.palette.accent;
+        let buf = f.buffer_mut();
+
+        // Pass 1: find contiguous runs of link-styled cells, top-to-bottom
+        // then left-to-right — the same reading order `visible` is in.
+        let mut runs: Vec<(u16, u16, u16)> = Vec::new();
+        for y in inner.y..inner.y + inner.height {
+            let mut run_start: Option<u16> = None;
+            for x in inner.x..inner.x + inner.width {
+                let is_link = buf
+                    .cell((x, y))
+                    .is_some_and(|c| c.fg == link_fg && c.modifier.contains(Modifier::UNDERLINED));
+                match (is_link, run_start) {
+                    (true, None) => run_start = Some(x),
+                    (false, Some(s)) => {
+                        runs.push((y, s, x - 1));
+                        run_start = None;
+                    }
+                    _ => {}
+                }
+            }
+            if let Some(s) = run_start {
+                runs.push((y, s, inner.x + inner.width - 1));
+            }
+        }
+        if runs.is_empty() {
+            return;
+        }
+
+        // Pass 2: consume the runs against `visible` in lockstep, splicing
+        // the OSC 8 open sequence onto the first cell of each run and the
+        // close sequence onto the last.
+        // Forces the diff/draw pass to treat these cells as occupying a
+        // single terminal column despite their symbol now containing dozens
+        // of literal URL bytes — otherwise it reads that string's naive
+        // unicode-width as the cell's on-screen width and skips that many
+        // subsequent cells as "covered", corrupting everything after the
+        // link. Same fix `ratatui-image` applies to its own escape-sequence
+        // cells (see `protocol::UNIT_WIDTH`).
+        let unit_width = CellDiffOption::ForcedWidth(std::num::NonZeroU16::new(1).unwrap());
+
+        // In full-width fullscreen mode `expand_links_to_raw_markdown` has
+        // already swapped each link span's rendered text for its full
+        // `[text](url)` source, so the on-screen run is that much longer —
+        // match runs against that length instead of just the label's.
+        let raw_mode = self.fullscreen == FullscreenMode::NoMargins;
+        let display_len = |link: &crate::markdown::LinkRef| -> usize {
+            if raw_mode {
+                format!("[{}]({})", link.text, link.url).chars().count().max(1)
+            } else {
+                link.text.chars().count().max(1)
+            }
+        };
+
+        let mut links_iter = visible.into_iter();
+        let Some(mut current) = links_iter.next() else { return };
+        let mut remaining = display_len(current);
+
+        for (y, start_x, end_x) in runs {
+            let run_len = (end_x - start_x + 1) as usize;
+            if let Some(cell) = buf.cell_mut((start_x, y)) {
+                let opened = format!("\x1b]8;;{}\x1b\\{}", current.url, cell.symbol());
+                cell.set_symbol(&opened).set_diff_option(unit_width);
+            }
+            if let Some(cell) = buf.cell_mut((end_x, y)) {
+                let closed = format!("{}\x1b]8;;\x1b\\", cell.symbol());
+                cell.set_symbol(&closed).set_diff_option(unit_width);
+            }
+
+            remaining = remaining.saturating_sub(run_len);
+            if remaining == 0 {
+                match links_iter.next() {
+                    Some(next) => {
+                        current = next;
+                        remaining = display_len(current);
+                    }
+                    None => break,
+                }
+            }
+        }
+    }
+
     /// Render the currently selected file's content across the entire terminal
     /// with no sidebar, borders or status bar (see the `f` key in the viewer).
     fn draw_fullscreen(
@@ -2759,13 +2936,17 @@ impl AppState {
             f.render_widget(Paragraph::new(media_lines).block(block), area);
         } else if self.file_content.is_some() {
             let inner = block.inner(area);
-            let text = self.content_for_display();
+            let mut text = self.content_for_display();
+            if self.fullscreen == FullscreenMode::NoMargins {
+                self.expand_links_to_raw_markdown(&mut text);
+            }
             let paragraph = Paragraph::new(text.clone())
                 .block(block)
                 .scroll((self.scroll_offset as u16, 0))
                 .wrap(Wrap { trim: false });
             f.render_widget(paragraph, area);
             self.render_inline_images(f, &text, inner);
+            self.render_hyperlinks(f, &text, inner);
         } else {
             let paragraph = Paragraph::new(vec![Line::from(Span::styled(
                 "No content loaded.",
