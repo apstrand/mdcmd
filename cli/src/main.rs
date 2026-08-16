@@ -114,6 +114,32 @@ fn suspend(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> 
     Ok(())
 }
 
+/// Handles a command-line path that doesn't exist yet: asks the user whether
+/// to create it. If yes, creates an empty file at that path and returns it so
+/// the caller can proceed as if it had already existed. If no (or input
+/// can't be read, e.g. non-interactive stdin), falls back to the path's
+/// parent directory instead.
+fn prompt_create_missing_path(path: &std::path::Path) -> Option<PathBuf> {
+    print!("{} does not exist. Create it? [y/N] ", path.display());
+    let _ = io::Write::flush(&mut io::stdout());
+
+    let mut answer = String::new();
+    let create = io::stdin().read_line(&mut answer).is_ok()
+        && matches!(answer.trim().to_lowercase().as_str(), "y" | "yes");
+
+    if create {
+        match std::fs::File::create(path) {
+            Ok(_) => Some(path.to_path_buf()),
+            Err(e) => {
+                eprintln!("Warning: failed to create {}: {e}", path.display());
+                path.parent().map(|p| p.to_path_buf())
+            }
+        }
+    } else {
+        path.parent().map(|p| p.to_path_buf())
+    }
+}
+
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
@@ -153,8 +179,7 @@ fn main() -> Result<()> {
         if path.exists() {
             Some(path)
         } else {
-            eprintln!("Warning: provided path does not exist.");
-            None
+            prompt_create_missing_path(&path)
         }
     } else {
         std::env::current_dir().ok()
