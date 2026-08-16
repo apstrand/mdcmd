@@ -2101,7 +2101,7 @@ dependencies = [
 
 [[package]]
 name = "mdcmd"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "dirs 5.0.1",
  "portable-pty",
