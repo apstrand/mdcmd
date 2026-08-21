@@ -1,0 +1,49 @@
+# Maintainer: Peter Strand <peter@zarquon.se>
+pkgname=mdcmd-bin
+pkgver=0.1.10
+pkgrel=1
+pkgdesc="Markdown editor and file browser built with Tauri, React and Tiptap"
+arch=('x86_64')
+url="https://mdcmd.com"
+license=('MIT')
+depends=('webkit2gtk-4.1' 'gtk3' 'hicolor-icon-theme')
+provides=('mdcmd')
+conflicts=('mdcmd')
+options=('!strip')
+source=(
+    "$pkgname.deb::https://github.com/apstrand/mdcmd/releases/download/v${pkgver}/MarkDown.Commander_${pkgver}_amd64.deb"
+    "LICENSE::https://raw.githubusercontent.com/apstrand/mdcmd/v${pkgver}/LICENSE"
+)
+sha256sums=('1ec7e547eb7a36ecf262728f6fa87ee895532a98955993fc1cb988ed0d3a17b8'
+            '79ea9e3c5bd48f96487fe5bba905941299e95bf4da89685af97bc50ec69e2a85')
+
+package() {
+    cd "$srcdir"
+
+    # The upstream release ships a .deb; unpack its ar members and then the
+    # inner data tarball directly into the package tree.
+    bsdtar -xf "$pkgname.deb"
+    bsdtar -xf data.tar.gz -C "$pkgdir"
+
+    # tauri-bundler names the .desktop file with the display name and a
+    # literal space; rename it to the binary name, as Arch packages expect.
+    install -Dm644 "$pkgdir/usr/share/applications/MarkDown Commander.desktop" \
+        "$pkgdir/usr/share/applications/mdcmd.desktop"
+    rm -f "$pkgdir/usr/share/applications/MarkDown Commander.desktop"
+
+    install -Dm644 "$srcdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+
+    # WebKitGTK's DMA-BUF renderer crashes on wlroots compositors (Hyprland,
+    # Sway) with "Error 71 (Protocol error) dispatching to Wayland display",
+    # confirmed on Omarchy. Move the real binary aside and exec it from a
+    # wrapper so both `mdcmd` on the CLI and the .desktop entry launch with
+    # the working renderer by default.
+    install -Dm755 "$pkgdir/usr/bin/mdcmd" "$pkgdir/usr/lib/mdcmd/mdcmd"
+    rm -f "$pkgdir/usr/bin/mdcmd"
+    cat > "$srcdir/mdcmd-wrapper" <<'EOF'
+#!/usr/bin/env bash
+export WEBKIT_DISABLE_DMABUF_RENDERER=1
+exec -a mdcmd /usr/lib/mdcmd/mdcmd "$@"
+EOF
+    install -Dm755 "$srcdir/mdcmd-wrapper" "$pkgdir/usr/bin/mdcmd"
+}

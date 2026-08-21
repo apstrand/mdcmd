@@ -1,0 +1,19 @@
+pkgbase = mdcmd-bin
+	pkgdesc = Markdown editor and file browser built with Tauri, React and Tiptap
+	pkgver = 0.1.10
+	pkgrel = 1
+	url = https://mdcmd.com
+	arch = x86_64
+	license = MIT
+	depends = webkit2gtk-4.1
+	depends = gtk3
+	depends = hicolor-icon-theme
+	provides = mdcmd
+	conflicts = mdcmd
+	options = !strip
+	source = mdcmd-bin.deb::https://github.com/apstrand/mdcmd/releases/download/v0.1.10/MarkDown.Commander_0.1.10_amd64.deb
+	source = LICENSE::https://raw.githubusercontent.com/apstrand/mdcmd/v0.1.10/LICENSE
+	sha256sums = 1ec7e547eb7a36ecf262728f6fa87ee895532a98955993fc1cb988ed0d3a17b8
+	sha256sums = 79ea9e3c5bd48f96487fe5bba905941299e95bf4da89685af97bc50ec69e2a85
+
+pkgname = mdcmd-bin
