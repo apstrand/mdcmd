@@ -232,7 +232,7 @@ private struct HomeList: View {
                     .font(.system(size: 30, weight: .bold))
                     .foregroundStyle(.white)
             }
-            Text("Edit Markdown in the files you already have — your iPhone, iCloud Drive, Dropbox, and more.")
+            Text("Edit Markdown files you already have — in iCloud Drive, Dropbox, and more.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
