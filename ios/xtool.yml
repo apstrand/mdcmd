@@ -1,0 +1,26 @@
+version: 1
+bundleID: com.mdcmd.ios
+product: Mdcmd
+deploymentTarget: "17.0"
+infoPath: Mdcmd-Info.plist
+
+# App icon: the shared brand mark (same as the web app and Tauri iOS build).
+# Regenerate from src-tauri/icons/icon.png with scripts/make-icon.sh.
+iconPath: AppIcon.png
+
+# ── Quick Note widget (opt-in) ────────────────────────────────────────────────
+# The widget shares its target with the app through the App Group
+# `group.com.mdcmd.ios`. That entitlement only provisions on a paid Apple
+# Developer team whose App ID has the App Groups capability enabled — on a free
+# personal team it fails with "A valid provisioning profile … was not found".
+#
+# So it's disabled by default, which keeps `xtool dev run` (device) provisioning
+# cleanly with no special entitlements. To enable the widget on a provisioned
+# team, uncomment the two lines below (the widget code lives in
+# Sources/QuickNoteWidget and stays compiling regardless):
+#
+# entitlementsPath: Mdcmd.entitlements
+# extensions:
+#   - product: QuickNoteWidget
+#     infoPath: QuickNoteWidget-Info.plist
+#     entitlementsPath: QuickNoteWidget.entitlements
