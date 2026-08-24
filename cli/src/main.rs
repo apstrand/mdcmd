@@ -33,6 +33,24 @@ OPTIONS:
     -v, --version      Print version information
         --debug-image  Print detected terminal image-protocol capabilities and exit";
 
+/// Version line shared by `-v`/`--version` and the top of `-h`/`--help`, and
+/// mirrored in the TUI's welcome/help screen (see `tui::get_welcome_text`).
+fn version_line() -> String {
+    let dirty = match env!("GIT_DIRTY") {
+        "dirty" => "-dirty",
+        _ => "",
+    };
+    format!(
+        "{} {} (commit {}{}, {}; built {})",
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_VERSION"),
+        env!("GIT_HASH"),
+        dirty,
+        env!("GIT_COMMIT_DATE"),
+        env!("BUILD_DATE"),
+    )
+}
+
 /// Runs the same terminal capability query the TUI uses at startup and prints
 /// the result, without entering the alternate screen. Useful for diagnosing
 /// why inline images fall back to halfblocks in a given terminal/session
@@ -147,11 +165,11 @@ fn main() -> Result<()> {
     for arg in &args[1..] {
         match arg.as_str() {
             "-h" | "--help" => {
-                println!("{HELP}");
+                println!("{}\n\n{HELP}", version_line());
                 return Ok(());
             }
             "-v" | "--version" => {
-                println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+                println!("{}", version_line());
                 return Ok(());
             }
             "--debug-image" => {

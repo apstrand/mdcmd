@@ -3048,12 +3048,20 @@ impl AppState {
             ]),
             Line::from(vec![
                 Span::styled(
-                    format!(
-                        "    v{}  ·  commit {}  ·  {}",
-                        env!("CARGO_PKG_VERSION"),
-                        env!("GIT_HASH"),
-                        env!("GIT_COMMIT_DATE"),
-                    ),
+                    {
+                        let dirty = match env!("GIT_DIRTY") {
+                            "dirty" => "-dirty",
+                            _ => "",
+                        };
+                        format!(
+                            "    v{}  ·  commit {}{}, {}  ·  built {}",
+                            env!("CARGO_PKG_VERSION"),
+                            env!("GIT_HASH"),
+                            dirty,
+                            env!("GIT_COMMIT_DATE"),
+                            env!("BUILD_DATE"),
+                        )
+                    },
                     Style::default().fg(text_secondary_color),
                 )
             ]),
