@@ -180,11 +180,18 @@ pub struct AppState {
     /// resumes. Raw mode disables the kernel's own SIGTSTP delivery for
     /// Ctrl-Z, so without this the keypress would just be swallowed.
     pub suspend_requested: bool,
+    /// Set when a command-line file argument was just created because it
+    /// didn't exist yet (see `main.rs::prompt_create_missing_path`).
+    /// Consumed by `main.rs` right after the first draw — by which point
+    /// `last_content_area` reflects the real terminal size — to drop
+    /// straight into the editor instead of showing an empty viewer for a
+    /// file that has no content yet.
+    pub pending_edit: bool,
 }
 
 
 impl AppState {
-    pub fn new(initial_path: Option<PathBuf>) -> Self {
+    pub fn new(initial_path: Option<PathBuf>, open_new_file_in_editor: bool) -> Self {
         let config = Config::load();
         
         let start_path = initial_path
@@ -287,6 +294,7 @@ impl AppState {
             watched_dir: None,
             suppress_images_this_frame: false,
             suspend_requested: false,
+            pending_edit: false,
         };
 
         app.reload_directory();
@@ -294,7 +302,11 @@ impl AppState {
         if let Some(file) = initial_file {
             app.select_file(file);
             app.active_section = ActiveSection::Viewer;
-            app.fullscreen = FullscreenMode::Margins;
+            if open_new_file_in_editor {
+                app.pending_edit = true;
+            } else {
+                app.fullscreen = FullscreenMode::Margins;
+            }
         }
 
         app
@@ -2010,7 +2022,7 @@ impl AppState {
     /// alternate screen and blocking on a foreground child process. The
     /// session is torn down automatically once the child process exits (see
     /// the `pty_session` exited-check at the top of `draw`).
-    fn edit_current_file(&mut self) -> Result<()> {
+    pub fn edit_current_file(&mut self) -> Result<()> {
         let file_path = match &self.selected_file {
             Some(p) => p.clone(),
             None => return Ok(()),
@@ -2151,6 +2163,35 @@ impl AppState {
         Text::from(lines)
     }
 
+    /// The viewer content area for `rect`, using the same layout math as the
+    /// normal (non-fullscreen) render path. Called unconditionally at the
+    /// top of `draw` — including while a fullscreen reading mode is active,
+    /// which otherwise never touches `last_content_area` — so a PTY editor
+    /// opened via 'e' is always sized against the real, current terminal
+    /// instead of a stale rect left over from the last normal-layout draw
+    /// (e.g. before the terminal was resized while reading fullscreen).
+    fn compute_content_area(&self, rect: Rect) -> Rect {
+        let main_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(0), Constraint::Length(1)])
+            .split(rect);
+
+        let pane_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
+            .split(main_chunks[0]);
+
+        if !self.open_files.is_empty() {
+            let right_chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(3), Constraint::Min(0)])
+                .split(pane_chunks[1]);
+            right_chunks[1]
+        } else {
+            pane_chunks[1]
+        }
+    }
+
     pub fn draw(&mut self, f: &mut Frame<'_>) {
         // The PTY's exit is only observed asynchronously by a background
         // thread; poll for it once per frame so we reliably fall back to the
@@ -2179,6 +2220,14 @@ impl AppState {
         let text_secondary_color = self.palette.text_secondary;
         let accent_color = self.palette.accent;
         let accent_soft_color = self.palette.accent_soft;
+
+        self.last_content_area = self.compute_content_area(rect);
+        if let Some(session) = self.pty_session.as_mut() {
+            session.resize(
+                self.last_content_area.width.saturating_sub(2),
+                self.last_content_area.height.saturating_sub(2),
+            );
+        }
 
         // Fullscreen reading modes: no sidebar, no borders, no status bar — just
         // the file content filling the whole terminal.
@@ -2489,17 +2538,10 @@ impl AppState {
             .borders(Borders::ALL)
             .border_style(Style::default().fg(viewer_border_color));
 
-        self.last_content_area = content_area;
         let viewer_inner_width = content_area.width.saturating_sub(2);
         if viewer_inner_width != self.image_layout_width && self.selected_file.is_some() {
             self.image_layout_width = viewer_inner_width;
             self.relayout_inline_images();
-        }
-        if let Some(session) = self.pty_session.as_mut() {
-            session.resize(
-                content_area.width.saturating_sub(2),
-                content_area.height.saturating_sub(2),
-            );
         }
 
         if let Some(session) = self.pty_session.as_ref() {

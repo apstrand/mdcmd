@@ -192,12 +192,18 @@ fn main() -> Result<()> {
         }
         return Ok(());
     }
+    // Tracks whether a command-line path was just created because it didn't
+    // exist yet, so the file can be opened straight into the editor instead
+    // of the viewer, which would otherwise just show an empty screen.
+    let mut open_new_file_in_editor = false;
     let initial_path = if let Some(arg) = path_arg {
         let path = PathBuf::from(arg);
         if path.exists() {
             Some(path)
         } else {
-            prompt_create_missing_path(&path)
+            let created = prompt_create_missing_path(&path);
+            open_new_file_in_editor = created.as_deref() == Some(path.as_path());
+            created
         }
     } else {
         std::env::current_dir().ok()
@@ -217,7 +223,7 @@ fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = AppState::new(initial_path);
+    let mut app = AppState::new(initial_path, open_new_file_in_editor);
 
     // tmux's `allow-passthrough` forwards escape sequences straight to the
     // real terminal without first syncing its cursor to tmux's pane-relative
@@ -241,7 +247,17 @@ fn main() -> Result<()> {
 
     while !app.quit {
         if app.needs_clear {
-            terminal.clear()?;
+            // `Terminal::clear()` snapshots the cursor position first via a
+            // DSR query, which blocks on a reply from the terminal. Right
+            // after startup (before any key event has round-tripped through
+            // the terminal yet — e.g. dropping straight into the editor for
+            // a freshly-created command-line file) that reply can race with
+            // — or simply never arrive in time for — this query, hanging the
+            // whole app. `Terminal::resize()` clears and resets the internal
+            // diff buffers the same way but, for our always-fullscreen
+            // viewport, never restores a cursor position and so never
+            // queries for one.
+            terminal.resize(terminal.size()?.into())?;
             app.needs_clear = false;
         }
         app.poll_fs_events();
@@ -272,6 +288,14 @@ fn main() -> Result<()> {
             }
         }
         terminal.draw(|f| app.draw(f))?;
+
+        // Deferred until after the first real draw so `last_content_area`
+        // reflects the actual terminal size (it starts out as a placeholder
+        // rect) before the PTY is sized off of it.
+        if app.pending_edit {
+            app.pending_edit = false;
+            app.edit_current_file()?;
+        }
 
         // An inline editor session needs to redraw promptly as the child
         // process produces output; the plain viewer doesn't change between
