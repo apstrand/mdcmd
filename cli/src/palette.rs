@@ -63,6 +63,17 @@ impl Palette {
             }
         }
     }
+
+    /// The background as a plain RGB triple, for the few places that hand it to
+    /// crossterm directly (which has its own `Color` type) rather than to
+    /// ratatui. Both palettes define `bg` as an RGB color, so the fallback is
+    /// unreachable in practice.
+    pub fn bg_rgb(&self) -> (u8, u8, u8) {
+        match self.bg {
+            Color::Rgb(r, g, b) => (r, g, b),
+            _ => (0, 0, 0),
+        }
+    }
 }
 
 /// Decide between the dark and light palette. Explicit env overrides win first

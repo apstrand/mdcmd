@@ -237,13 +237,22 @@ impl AppState {
         {
             image_picker.set_protocol_type(ratatui_image::picker::ProtocolType::Iterm2);
         }
-        let bg_rgb = image_picker.capabilities().iter().find_map(|cap| {
-            if let ratatui_image::picker::Capability::Background(r, g, b) = cap {
-                Some((*r, *g, *b))
-            } else {
-                None
-            }
-        });
+        let bg_rgb = image_picker
+            .capabilities()
+            .iter()
+            .find_map(|cap| {
+                if let ratatui_image::picker::Capability::Background(r, g, b) = cap {
+                    Some((*r, *g, *b))
+                } else {
+                    None
+                }
+            })
+            // Inside tmux the bundled query above never learns the background:
+            // it goes out through tmux's passthrough envelope, and tmux eats the
+            // terminal's OSC 11 reply before it can reach this pane. Asking again
+            // without the envelope gets an answer from tmux itself, so a light
+            // terminal doesn't silently fall through to the dark palette.
+            .or_else(crate::termquery::query_background);
         let palette = Palette::detect(bg_rgb);
         let mut app = Self {
             config,

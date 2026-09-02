@@ -1,9 +1,10 @@
-use std::io;
+use std::io::{self, BufWriter};
 use std::path::PathBuf;
 use std::time::Duration;
 use crossterm::{
     event::{self, Event},
-    execute,
+    execute, queue,
+    style::SetBackgroundColor,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     cursor::{Hide, Show},
 };
@@ -17,6 +18,10 @@ mod termquery;
 mod tui;
 
 use tui::AppState;
+
+/// The terminal the whole app draws through. See `main` for why stdout is
+/// wrapped in a [`BufWriter`].
+type Tui = Terminal<CrosstermBackend<BufWriter<io::Stdout>>>;
 
 const HELP: &str = "\
 mdc — Terminal file browser and Markdown viewer
@@ -97,27 +102,44 @@ fn debug_image() {
             ..Default::default()
         },
     );
+    // The standalone (non-passthrough) background query the TUI falls back on;
+    // inside tmux this is the only one of the two that gets an answer.
+    let osc11_background = termquery::query_background();
+    let is_wezterm = termquery::is_wezterm();
     if raw_was_enabled {
         let _ = disable_raw_mode();
     }
 
+    let mut picker_background = None;
     match picker {
         Ok(p) => {
             println!("protocol_type={:?}", p.protocol_type());
             println!("font_size={:?}", p.font_size());
             println!("capabilities={:?}", p.capabilities());
+            picker_background = p.capabilities().iter().find_map(|cap| {
+                if let ratatui_image::picker::Capability::Background(r, g, b) = cap {
+                    Some((*r, *g, *b))
+                } else {
+                    None
+                }
+            });
         }
         Err(e) => println!("query failed: {e:?}"),
     }
 
-    println!("xtversion_is_wezterm={:?}", termquery::is_wezterm());
+    println!("osc11_background={osc11_background:?}");
+    println!(
+        "light_mode={:?}",
+        palette::is_light_mode(picker_background.or(osc11_background))
+    );
+    println!("xtversion_is_wezterm={is_wezterm:?}");
 }
 
 /// Tears the terminal down, stops the process with SIGTSTP (the same signal
 /// the kernel would send for Ctrl-Z outside of raw mode), and restores the
 /// terminal once the shell resumes us with SIGCONT. A no-op on non-Unix
 /// platforms, which have no equivalent job-control signal.
-fn suspend(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
+fn suspend(terminal: &mut Tui) -> Result<()> {
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen, Show)?;
 
@@ -128,7 +150,39 @@ fn suspend(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> 
 
     enable_raw_mode()?;
     execute!(terminal.backend_mut(), EnterAlternateScreen, Hide)?;
-    terminal.clear()?;
+    // Repainting the freshly re-entered alternate screen is left to the
+    // caller's `needs_clear` handling, which erases in the app's own
+    // background color instead of the terminal's.
+    Ok(())
+}
+
+/// Repaints the whole screen in the app's background color and makes the next
+/// draw redraw every cell.
+///
+/// Erasing normally uses the terminal's *default* background (terminals erase
+/// with whatever background color is currently selected), so a clear on a light
+/// terminal flashes white for as long as it takes the following repaint to
+/// land. Selecting our own background first makes the erase paint in the app's
+/// color, so the clear is invisible.
+///
+/// `Terminal::clear()` snapshots the cursor position first via a DSR query,
+/// which blocks on a reply from the terminal. Right after startup (before any
+/// key event has round-tripped through the terminal yet — e.g. dropping
+/// straight into the editor for a freshly-created command-line file) that reply
+/// can race with — or simply never arrive in time for — this query, hanging the
+/// whole app. `Terminal::resize()` clears and resets the internal diff buffers
+/// the same way but, for our always-fullscreen viewport, never restores a
+/// cursor position and so never queries for one.
+fn clear_to_background(terminal: &mut Tui, bg: (u8, u8, u8)) -> Result<()> {
+    let (r, g, b) = bg;
+    // Queued, not executed: the clear below is what flushes, so the color
+    // selection travels in the same write and is guaranteed to already be in
+    // effect when the terminal erases.
+    queue!(
+        terminal.backend_mut(),
+        SetBackgroundColor(crossterm::style::Color::Rgb { r, g, b })
+    )?;
+    terminal.resize(terminal.size()?.into())?;
     Ok(())
 }
 
@@ -220,10 +274,18 @@ fn main() -> Result<()> {
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, Hide)?;
 
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
+    // `io::Stdout` buffers only 1 KiB, which a full-screen repaint overflows
+    // many times over, so the frame reaches the terminal as a stream of partial
+    // writes and paints visibly top to bottom. Buffering the whole frame leaves
+    // it to ratatui's own end-of-draw flush to decide when it hits the wire.
+    let backend = CrosstermBackend::new(BufWriter::new(stdout));
+    let mut terminal: Tui = Terminal::new(backend)?;
 
     let mut app = AppState::new(initial_path, open_new_file_in_editor);
+
+    // The alternate screen starts out at the terminal's default background;
+    // paint it in the app's colors before the first frame lands on it.
+    clear_to_background(&mut terminal, app.palette.bg_rgb())?;
 
     // tmux's `allow-passthrough` forwards escape sequences straight to the
     // real terminal without first syncing its cursor to tmux's pane-relative
@@ -247,17 +309,7 @@ fn main() -> Result<()> {
 
     while !app.quit {
         if app.needs_clear {
-            // `Terminal::clear()` snapshots the cursor position first via a
-            // DSR query, which blocks on a reply from the terminal. Right
-            // after startup (before any key event has round-tripped through
-            // the terminal yet — e.g. dropping straight into the editor for
-            // a freshly-created command-line file) that reply can race with
-            // — or simply never arrive in time for — this query, hanging the
-            // whole app. `Terminal::resize()` clears and resets the internal
-            // diff buffers the same way but, for our always-fullscreen
-            // viewport, never restores a cursor position and so never
-            // queries for one.
-            terminal.resize(terminal.size()?.into())?;
+            clear_to_background(&mut terminal, app.palette.bg_rgb())?;
             app.needs_clear = false;
         }
         app.poll_fs_events();
