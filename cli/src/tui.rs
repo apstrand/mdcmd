@@ -158,6 +158,16 @@ pub struct AppState {
     pub image_protocol: Option<ratatui_image::protocol::StatefulProtocol>,
     pub pty_session: Option<PtySession>,
     pub last_content_area: Rect,
+    /// The inner (border- and padding-excluded) rect the viewer text was
+    /// last rendered into, in whichever layout is active — normal panes or
+    /// either fullscreen reading mode. Scrolling clamps against this so a
+    /// page-down can't run past the end of the document into blank space.
+    pub last_viewer_inner: Rect,
+    /// Total wrapped-row height of the document as last rendered, measured
+    /// against `last_viewer_inner` and on the exact `Text` the viewer drew —
+    /// which is not always `file_content` (search highlighting, and the
+    /// raw-markdown link expansion the no-margins reading mode applies).
+    pub last_doc_rows: usize,
     /// The viewer inner width `image_blocks` was last sized for. Compared
     /// against the current width each frame so images get relaid-out after
     /// a resize instead of keeping stale, wrongly-proportioned reserved
@@ -297,6 +307,8 @@ impl AppState {
             image_protocol: None,
             pty_session: None,
             last_content_area: Rect::new(0, 0, 80, 24),
+            last_viewer_inner: Rect::new(0, 0, 78, 22),
+            last_doc_rows: 0,
             image_layout_width: 0,
             watcher: None,
             watch_rx: None,
@@ -531,8 +543,9 @@ impl AppState {
         };
         self.view_search_current = idx;
         if let Some(text) = &self.file_content {
-            let width = self.last_content_area.width.saturating_sub(2).max(1);
-            self.scroll_offset = wrapped_row_offset(text, line_idx, width) as usize;
+            let width = self.viewer_wrap_width();
+            let target = wrapped_row_offset(text, line_idx, width) as usize;
+            self.scroll_offset = target.min(self.max_scroll());
         }
     }
 
@@ -543,7 +556,7 @@ impl AppState {
         if self.view_search_matches.is_empty() {
             return;
         }
-        let width = self.last_content_area.width.saturating_sub(2).max(1);
+        let width = self.viewer_wrap_width();
         let from_line = self
             .file_content
             .as_ref()
@@ -1986,13 +1999,13 @@ impl AppState {
                 }
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                self.scroll_offset = self.scroll_offset.saturating_add(1);
+                self.scroll_offset = self.scroll_offset.saturating_add(1).min(self.max_scroll());
             }
             KeyCode::Up | KeyCode::Char('k') => {
                 self.scroll_offset = self.scroll_offset.saturating_sub(1);
             }
             KeyCode::PageDown | KeyCode::Char(' ') => {
-                self.scroll_offset = self.scroll_offset.saturating_add(15);
+                self.scroll_offset = self.scroll_offset.saturating_add(15).min(self.max_scroll());
             }
             KeyCode::PageUp | KeyCode::Backspace => {
                 self.scroll_offset = self.scroll_offset.saturating_sub(15);
@@ -2046,8 +2059,11 @@ impl AppState {
 
         // Map the wrapped-row scroll position back to a raw source line so
         // the editor opens with the same area in view as the viewer showed.
+        // The offset was measured against the width the viewer last drew at,
+        // which is not the PTY's width when 'e' is pressed while fullscreen.
+        let wrap_width = self.viewer_wrap_width();
         let line_number = self.file_content.as_ref().map(|text| {
-            let ridx = rendered_line_for_scroll(text, self.scroll_offset, cols);
+            let ridx = rendered_line_for_scroll(text, self.scroll_offset, wrap_width);
             self.line_map.get(ridx).copied().unwrap_or(0) + 1
         });
 
@@ -2143,6 +2159,40 @@ impl AppState {
     /// (the current match distinctly from the rest), or a plain clone when
     /// there's no active search. Used by both the normal and fullscreen
     /// viewer renderers.
+    /// The largest scroll offset that still shows document content: the
+    /// document's total wrapped-row count less one viewport of rows. Every
+    /// scroll key clamps to this, so paging down near the end stops with the
+    /// last line at the bottom of the pane instead of scrolling the text off
+    /// the top into empty space.
+    /// The width the viewer text is currently wrapped at. Taken from the
+    /// last rendered frame rather than recomputed from the pane layout, so
+    /// wrapped-row math stays right in the fullscreen reading modes too —
+    /// they wrap at a centered reading width (or the whole terminal), not at
+    /// the normal viewer pane's width.
+    fn viewer_wrap_width(&self) -> u16 {
+        self.last_viewer_inner.width.max(1)
+    }
+
+    fn max_scroll(&self) -> usize {
+        let mut visible = self.last_viewer_inner.height as usize;
+        // The fullscreen search bar is painted over the bottom row, so that
+        // row can't be the resting place for the document's last line.
+        if self.fullscreen != FullscreenMode::Off
+            && (self.view_search_active || self.view_search_query.is_some())
+        {
+            visible = visible.saturating_sub(1);
+        }
+        self.last_doc_rows.saturating_sub(visible)
+    }
+
+    /// Records the viewer viewport and the document's wrapped height for the
+    /// frame being drawn, so `max_scroll` can clamp against what is actually
+    /// on screen.
+    fn record_viewer_metrics(&mut self, inner: Rect, text: &Text<'static>) {
+        self.last_viewer_inner = inner;
+        self.last_doc_rows = wrapped_row_offset(text, text.lines.len(), inner.width) as usize;
+    }
+
     fn content_for_display(&self) -> Text<'static> {
         let Some(text) = self.file_content.as_ref() else {
             return Text::default();
@@ -2242,6 +2292,7 @@ impl AppState {
         // the file content filling the whole terminal.
         if self.fullscreen != FullscreenMode::Off {
             self.draw_fullscreen(f, rect, text_primary_color, text_secondary_color, accent_color);
+            self.render_fullscreen_search_bar(f, rect, text_primary_color, text_secondary_color, accent_color);
             return;
         }
 
@@ -2611,6 +2662,7 @@ impl AppState {
             } else if self.file_content.is_some() {
                 let inner = viewer_block.inner(content_area);
                 let text = self.content_for_display();
+                self.record_viewer_metrics(inner, &text);
                 let paragraph = Paragraph::new(text.clone())
                     .block(viewer_block)
                     .scroll((self.scroll_offset as u16, 0))
@@ -2785,6 +2837,14 @@ impl AppState {
     /// with this same `text`) still makes the whole thing clickable.
     fn expand_links_to_raw_markdown(&self, text: &mut Text<'static>) {
         for link in &self.links {
+            // `link.span` indexes the spans of the *unhighlighted* line;
+            // search highlighting splits a matched span into up to three, so
+            // on a line carrying a match that index points at the wrong span
+            // and expanding it would corrupt the line. Leave those lines
+            // rendered as-is — the match stays highlighted and correct.
+            if self.view_search_matches.iter().any(|&(line, _, _)| line == link.line) {
+                continue;
+            }
             if let Some(span) = text.lines.get_mut(link.line).and_then(|l| l.spans.get_mut(link.span)) {
                 span.content = format!("[{}]({})", link.text, link.url).into();
             }
@@ -2915,6 +2975,56 @@ impl AppState {
 
     /// Render the currently selected file's content across the entire terminal
     /// with no sidebar, borders or status bar (see the `f` key in the viewer).
+    /// The fullscreen reading modes drop the status bar, which is where a
+    /// content search normally echoes what you're typing and how many
+    /// matches it found — without it, '/' looks like it does nothing. Draw
+    /// that same line, vim-style, over the bottom row of the terminal
+    /// whenever a search is being typed or is live.
+    fn render_fullscreen_search_bar(
+        &self,
+        f: &mut Frame<'_>,
+        area: Rect,
+        text_primary_color: Color,
+        text_secondary_color: Color,
+        accent_color: Color,
+    ) {
+        if area.height == 0 || area.width == 0 {
+            return;
+        }
+        let line = if self.view_search_active {
+            Line::from(vec![
+                Span::styled(" 🔍 Find in file: ", Style::default().fg(accent_color).add_modifier(Modifier::BOLD)),
+                Span::styled(self.view_search_input.clone(), Style::default().fg(text_primary_color)),
+                Span::styled("█", Style::default().fg(accent_color)),
+                Span::styled("  (Enter to search, Esc to cancel)", Style::default().fg(text_secondary_color)),
+            ])
+        } else if let Some(ref query) = self.view_search_query {
+            let count = self.view_search_matches.len();
+            let position_span = if count > 0 {
+                Span::styled(format!(" {}/{} ", self.view_search_current + 1, count), Style::default().fg(text_primary_color))
+            } else {
+                Span::styled(" 0 matches ", Style::default().fg(text_secondary_color))
+            };
+            Line::from(vec![
+                Span::styled(" 🔍 ", Style::default().fg(accent_color).add_modifier(Modifier::BOLD)),
+                Span::styled(format!("\"{}\"", query), Style::default().fg(text_primary_color).add_modifier(Modifier::BOLD)),
+                position_span,
+                Span::styled("|", Style::default().fg(text_primary_color)),
+                Span::styled(" n/p", Style::default().fg(accent_color).add_modifier(Modifier::BOLD)),
+                Span::styled(" next/prev |", Style::default().fg(text_primary_color)),
+                Span::styled(" Esc", Style::default().fg(accent_color).add_modifier(Modifier::BOLD)),
+                Span::styled(" end search", Style::default().fg(text_primary_color)),
+            ])
+        } else {
+            return;
+        };
+        let row = Rect::new(area.x, area.y + area.height - 1, area.width, 1);
+        f.render_widget(
+            Paragraph::new(line).style(Style::default().bg(self.palette.code_bg)),
+            row,
+        );
+    }
+
     fn draw_fullscreen(
         &mut self,
         f: &mut Frame<'_>,
@@ -2991,6 +3101,7 @@ impl AppState {
             if self.fullscreen == FullscreenMode::NoMargins {
                 self.expand_links_to_raw_markdown(&mut text);
             }
+            self.record_viewer_metrics(inner, &text);
             let paragraph = Paragraph::new(text.clone())
                 .block(block)
                 .scroll((self.scroll_offset as u16, 0))

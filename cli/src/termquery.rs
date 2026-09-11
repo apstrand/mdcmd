@@ -1,4 +1,7 @@
-use std::io::{Read, Write};
+#[cfg(not(unix))]
+use std::io::Read;
+use std::io::Write;
+#[cfg(not(unix))]
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -8,12 +11,70 @@ use std::time::Duration;
 /// Every query here ends with a Device Status Report (`CSI 5n`); its `CSI 0n`
 /// reply means the terminal has said everything it is going to, so we give up
 /// there instead of waiting out the timeout on terminals that ignore the
-/// interesting part of the query. The read runs on a helper thread because a
-/// blocking read on stdin can't be cancelled, so a terminal that answers
-/// nothing at all would otherwise wedge the app.
+/// interesting part of the query.
+///
+/// The timeout is enforced by waiting for readable input with `poll(2)` before
+/// each read, so giving up actually stops reading. Doing the read on a helper
+/// thread instead (which is the only way to abandon a *blocking* read) leaves
+/// that thread parked in `read` for the life of the process, where it goes on
+/// stealing bytes from stdin — the user's keystrokes — that crossterm never
+/// sees. That's not hypothetical: a terminal only has to fail to answer one
+/// query (tmux with no attached client, or an outer terminal that ignores
+/// OSC 11 over ssh) and the app then drops keys at random forever.
+///
+/// Reads go to the raw file descriptor rather than through `io::Stdin`, whose
+/// internal `BufReader` would swallow anything that arrives in the same read
+/// as the reply — again, keystrokes crossterm would then never see.
 ///
 /// Assumes raw mode is already enabled (the TUI startup path does that before
 /// any of this runs), so replies arrive as plain bytes rather than line input.
+#[cfg(unix)]
+fn query_stdio<T, F>(query: String, extract: F, timeout: Duration) -> Option<T>
+where
+    T: Send + 'static,
+    F: Fn(&str) -> Option<T> + Send + 'static,
+{
+    use std::os::fd::AsRawFd;
+
+    let mut stdout = std::io::stdout();
+    if stdout.write_all(query.as_bytes()).is_err() || stdout.flush().is_err() {
+        return None;
+    }
+
+    let fd = std::io::stdin().as_raw_fd();
+    let deadline = std::time::Instant::now() + timeout;
+    let mut response = String::new();
+    let mut chunk = [0u8; 256];
+    loop {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            return None;
+        }
+        let mut pfd = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
+        let ready = unsafe {
+            libc::poll(&mut pfd, 1, remaining.as_millis().min(i32::MAX as u128) as i32)
+        };
+        if ready <= 0 {
+            // Timed out, or the poll failed; either way stop reading.
+            return None;
+        }
+        let n = unsafe { libc::read(fd, chunk.as_mut_ptr() as *mut libc::c_void, chunk.len()) };
+        if n <= 0 {
+            return None;
+        }
+        response.push_str(&String::from_utf8_lossy(&chunk[..n as usize]));
+        if let Some(value) = extract(&response) {
+            return Some(value);
+        }
+        if response.contains("\x1b[0n") {
+            return None;
+        }
+    }
+}
+
+/// Non-Unix fallback: no `poll(2)`, so the read has to run on a helper thread
+/// that outlives the timeout. See the Unix version above for what that costs.
+#[cfg(not(unix))]
 fn query_stdio<T, F>(query: String, extract: F, timeout: Duration) -> Option<T>
 where
     T: Send + 'static,
