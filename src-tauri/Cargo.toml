@@ -1,6 +1,6 @@
 [package]
 name = "mdcmd"
-version = "0.1.12"
+version = "0.1.13"
 description = "MarkDown Commander"
 authors = ["Peter Strand"]
 edition = "2021"
