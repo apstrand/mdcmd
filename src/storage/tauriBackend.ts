@@ -1,5 +1,5 @@
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
-import type { FileEntry, PinnedItem, StorageBackend } from "./types";
+import type { FileEntry, PathStat, PinnedItem, StorageBackend } from "./types";
 
 // Desktop backend: thin wrapper over the existing Tauri commands.
 export const tauriBackend: StorageBackend = {
@@ -37,6 +37,9 @@ export const tauriBackend: StorageBackend = {
   },
   writeWorkspaces(items: PinnedItem[]) {
     return invoke("write_workspaces", { workspaces: items }).then(() => undefined);
+  },
+  statPaths(paths: string[]) {
+    return invoke<(PathStat | null)[]>("path_stats", { paths });
   },
   async getMediaUrl(path: string) {
     return convertFileSrc(path);

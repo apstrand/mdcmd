@@ -179,6 +179,16 @@ pub struct AppState {
     watcher: Option<notify::RecommendedWatcher>,
     watch_rx: Option<std::sync::mpsc::Receiver<notify::Result<notify::Event>>>,
     watched_dir: Option<PathBuf>,
+    /// Second watcher, on the directory holding `selected_file`, so the viewer
+    /// follows the file it is showing. A separate watcher because the viewed
+    /// file is not always inside `current_dir` (browsing moves on while the
+    /// file stays open), and it watches the parent directory rather than the
+    /// file itself because editors typically save by writing a temporary file
+    /// and renaming it over the original, which a watch on the file's own
+    /// inode stops seeing.
+    file_watcher: Option<notify::RecommendedWatcher>,
+    file_watch_rx: Option<std::sync::mpsc::Receiver<notify::Result<notify::Event>>>,
+    watched_file_dir: Option<PathBuf>,
     /// When set, `draw` skips rendering image widgets entirely (everything
     /// else draws normally). Used by the tmux image-positioning workaround
     /// in `main.rs`: it draws once with this set to settle layout/cursor
@@ -313,6 +323,9 @@ impl AppState {
             watcher: None,
             watch_rx: None,
             watched_dir: None,
+            file_watcher: None,
+            file_watch_rx: None,
+            watched_file_dir: None,
             suppress_images_this_frame: false,
             suspend_requested: false,
             pending_edit: false,
@@ -797,25 +810,138 @@ impl AppState {
         }
     }
 
-    /// Drains any pending filesystem-change events for `current_dir` and
-    /// reloads the listing if something changed. Called every iteration of
-    /// the main loop so the List view stays live without user input; the
-    /// Tree view already re-reads the filesystem on every draw.
+    /// (Re)arms the watcher on the directory holding the file in the viewer.
+    /// Like `ensure_watcher` this is a cheap no-op while that directory is
+    /// unchanged, so it can be called from the main loop every iteration. It
+    /// may end up watching the same directory as `watcher` does, which costs
+    /// one extra (idle) watch and keeps the two concerns independent.
+    fn ensure_file_watcher(&mut self) {
+        let dir = self
+            .selected_file
+            .as_ref()
+            .and_then(|p| p.parent())
+            .map(|p| p.to_path_buf());
+        if self.watched_file_dir == dir {
+            return;
+        }
+        self.file_watcher = None;
+        self.file_watch_rx = None;
+        self.watched_file_dir = None;
+
+        let Some(dir) = dir else {
+            return;
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        if let Ok(mut watcher) = notify::recommended_watcher(move |res| {
+            let _ = tx.send(res);
+        }) {
+            if watcher.watch(&dir, notify::RecursiveMode::NonRecursive).is_ok() {
+                self.file_watcher = Some(watcher);
+                self.file_watch_rx = Some(rx);
+                self.watched_file_dir = Some(dir);
+            }
+        }
+    }
+
+    /// Drains any pending filesystem-change events for `current_dir` and the
+    /// viewed file's directory, reloading the listing and/or the viewer if
+    /// something changed. Called every iteration of the main loop so both stay
+    /// live without user input; the Tree view already re-reads the filesystem
+    /// on every draw.
     pub fn poll_fs_events(&mut self) {
-        let mut changed = false;
+        self.ensure_file_watcher();
+
+        let mut dir_changed = false;
+        let mut touched: Vec<PathBuf> = Vec::new();
         if let Some(rx) = &self.watch_rx {
             while let Ok(res) = rx.try_recv() {
-                if res.is_ok() {
-                    changed = true;
+                if let Ok(event) = res {
+                    dir_changed = true;
+                    touched.extend(event.paths);
                 }
             }
         }
-        if changed {
+        if let Some(rx) = &self.file_watch_rx {
+            while let Ok(res) = rx.try_recv() {
+                if let Ok(event) = res {
+                    touched.extend(event.paths);
+                }
+            }
+        }
+
+        if dir_changed {
             self.reload_directory();
             if let Some(q) = self.search_query.clone() {
                 self.cached_search_results = Some(self.get_search_results(&q));
             }
         }
+
+        // While the inline editor is running it owns the file, and the viewer
+        // is reloaded from disk anyway once that session exits (see `draw`).
+        let viewer_touched = self
+            .selected_file
+            .as_ref()
+            .is_some_and(|path| touched.iter().any(|p| p == path));
+        if viewer_touched && self.pty_session.is_none() {
+            self.reload_selected_file();
+        }
+    }
+
+    /// Re-reads the file in the viewer after it changed on disk, keeping the
+    /// reading position and any active content search — unlike `select_file`,
+    /// which starts the file over from the top.
+    pub fn reload_selected_file(&mut self) {
+        let Some(path) = self.selected_file.clone() else {
+            return;
+        };
+        let path_str = path.to_string_lossy().into_owned();
+
+        if is_media_file(&path_str) {
+            if !is_video_file(&path_str) {
+                // Keep the old frame if the new one can't be decoded yet (a
+                // half-written image), rather than emptying the pane.
+                if let Some(protocol) = image::ImageReader::open(&path)
+                    .ok()
+                    .and_then(|reader| reader.decode().ok())
+                    .map(|img| self.image_picker.new_resize_protocol(img))
+                {
+                    self.image_protocol = Some(protocol);
+                }
+            }
+            return;
+        }
+
+        let content = match fs::read_to_string(&path) {
+            Ok(content) => content,
+            Err(_) => {
+                // Deleted, replaced by a directory, or briefly unreadable
+                // mid-write: say so but keep showing what was last read.
+                self.status_message = Some("Viewed file is no longer readable".to_string());
+                return;
+            }
+        };
+
+        let parsed = parse_markdown(&content, &self.palette);
+        let (text, line_map, image_blocks, links) = self.load_inline_images(&path, parsed);
+        self.file_lines_count = text.lines.len();
+        // Refresh the document height against the width last drawn so the
+        // scroll position below is clamped to the *new* content, not the old.
+        self.last_doc_rows =
+            wrapped_row_offset(&text, text.lines.len(), self.viewer_wrap_width()) as usize;
+        self.file_content = Some(text);
+        self.line_map = line_map;
+        self.image_blocks = image_blocks;
+        self.links = links;
+        self.image_layout_width = 0;
+        self.scroll_offset = self.scroll_offset.min(self.max_scroll());
+        self.error = None;
+        if self.view_search_active || self.view_search_query.is_some() {
+            self.recompute_view_search();
+            if self.view_search_current >= self.view_search_matches.len() {
+                self.view_search_current = 0;
+            }
+        }
+        self.status_message = Some("Reloaded: file changed on disk".to_string());
     }
 
     pub fn reload_directory(&mut self) {

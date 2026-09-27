@@ -1,6 +1,7 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { storage } from "../storage";
+import { storage, type PathStat } from "../storage";
+import { useDiskChanges, recordPathSignature } from "../hooks/useDiskChanges";
 import {
   connectedProviders,
   connectableProviders,
@@ -40,6 +41,12 @@ interface PinnedItem {
   path: string;
   isDir: boolean;
 }
+
+/** Whether two directory listings hold the same entries in the same order. */
+const sameListing = (a: FileEntry[] | undefined, b: FileEntry[]) =>
+  !!a &&
+  a.length === b.length &&
+  a.every((entry, i) => entry.path === b[i].path && entry.is_dir === b[i].is_dir);
 
 interface VersionInfo {
   version: string;
@@ -93,6 +100,10 @@ export default function FileBrowser({
   const [createTarget, setCreateTarget] = useState<{ isDir: boolean; dir: string } | null>(null);
   const [createName, setCreateName] = useState("");
   const [reloadToken, setReloadToken] = useState(0);
+  // What each listed folder looked like on disk when it was last read, so the
+  // background poll below can spot files created, renamed or deleted by other
+  // programs and refresh the listing without the user asking.
+  const dirSignaturesRef = useRef<Record<string, string>>({});
   const createInputRef = useRef<HTMLInputElement>(null);
 
   // Right-click context menu (folder entries + folder-pane background), with
@@ -310,8 +321,28 @@ export default function FileBrowser({
         ...prev,
         [path]: res,
       }));
+      void recordPathSignature(dirSignaturesRef, path);
     } catch (err) {
       console.error(`Error loading tree directory ${path}:`, err);
+    }
+  };
+
+  // Re-read a folder already shown in the tree, replacing its cached entries
+  // (unlike `loadTreeDirectory`, which leaves a loaded folder alone).
+  const refreshTreeDirectory = async (path: string) => {
+    try {
+      const res = await storage.listDirectory(path);
+      setTreeEntries((prev) =>
+        sameListing(prev[path], res) ? prev : { ...prev, [path]: res },
+      );
+    } catch {
+      // Gone or unreadable: drop it so the tree stops showing stale children.
+      setTreeEntries((prev) => {
+        if (!(path in prev)) return prev;
+        const next = { ...prev };
+        delete next[path];
+        return next;
+      });
     }
   };
 
@@ -458,6 +489,15 @@ export default function FileBrowser({
     }
   }, [currentPath, setCurrentPath]);
 
+  const sortEntries = (data: FileEntry[]) =>
+    [...data].sort((a, b) => {
+      if (sortOrder === "mtime") {
+        // Note: Backend doesn't currently provide mtime. Placeholder logic.
+        return 0;
+      }
+      return a.name.localeCompare(b.name);
+    });
+
   // Load directory contents when current path changes
   useEffect(() => {
   if (!currentPath) return;
@@ -469,15 +509,9 @@ export default function FileBrowser({
   storage.listDirectory(currentPath)
     .then((data) => {
       if (active) {
-        const sorted = [...data].sort((a, b) => {
-          if (sortOrder === "mtime") {
-             // Note: Backend doesn't currently provide mtime. Placeholder logic.
-             return 0;
-          }
-          return a.name.localeCompare(b.name);
-        });
-        setEntries(sorted);
+        setEntries(sortEntries(data));
         setLoading(false);
+        void recordPathSignature(dirSignaturesRef, currentPath);
       }
     })
     .catch((err) => {
@@ -491,6 +525,49 @@ export default function FileBrowser({
     active = false;
   };
   }, [currentPath, reloadToken, sortOrder]);
+
+  // Re-read the browsed folder in the background: no spinner, and the entries
+  // are only replaced when they actually differ, so an unchanged folder causes
+  // no re-render (and no loss of the keyboard focus position).
+  const refreshEntries = async (dir: string) => {
+    try {
+      const sorted = sortEntries(await storage.listDirectory(dir));
+      setEntries((prev) => (sameListing(prev, sorted) ? prev : sorted));
+      setError(null);
+    } catch (err) {
+      setError(String(err));
+    }
+  };
+
+  // The folders whose listings are on screen and therefore worth polling: the
+  // browsed folder in List view, and the loaded/expanded ones in Tree view.
+  const watchedDirs = useMemo(() => {
+    if (viewMode === "tree") {
+      const visible = [treeRootPath, ...Object.keys(expandedPaths).filter((p) => expandedPaths[p])];
+      return [...new Set(visible)].filter((dir) => dir && treeEntries[dir]);
+    }
+    return currentPath ? [currentPath] : [];
+  }, [viewMode, currentPath, treeRootPath, expandedPaths, treeEntries]);
+
+  const handleDirChange = (dir: string, stat: PathStat | null) => {
+    if (viewMode === "tree") {
+      if (!stat) {
+        setTreeEntries((prev) => {
+          if (!(dir in prev)) return prev;
+          const next = { ...prev };
+          delete next[dir];
+          return next;
+        });
+        return;
+      }
+      void refreshTreeDirectory(dir);
+    } else if (dir === currentPath) {
+      // A vanished folder falls through too, so the listing error surfaces.
+      void refreshEntries(dir);
+    }
+  };
+
+  useDiskChanges(watchedDirs, dirSignaturesRef, handleDirChange);
 
   // Go to parent directory
   // The pinned "storage root" that contains `path` (the longest matching pinned

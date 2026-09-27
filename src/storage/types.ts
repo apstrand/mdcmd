@@ -25,6 +25,14 @@ export interface StorageCapabilities {
   documentPicker: boolean;
 }
 
+/** Filesystem metadata for one path, as reported by `statPaths`. */
+export interface PathStat {
+  /** Modification time in milliseconds since the Unix epoch. */
+  mtimeMs: number;
+  size: number;
+  isDir: boolean;
+}
+
 /** A folder the user granted access to via the native document picker. */
 export interface PickedFolder {
   path: string;
@@ -72,6 +80,15 @@ export interface StorageBackend {
   writeWorkspaces(items: PinnedItem[]): Promise<void>;
   /** Resolve a URL usable in <img>/<video> src for the given media file. */
   getMediaUrl(path: string): Promise<string>;
+
+  /**
+   * Stat several paths in one round trip, `null` for anything that no longer
+   * exists. Backends that implement this can be polled for files and folders
+   * changed on disk behind the app's back (see `useDiskChanges`); backends
+   * where that would be too expensive (the cloud providers) simply omit it and
+   * no polling happens.
+   */
+  statPaths?(paths: string[]): Promise<(PathStat | null)[]>;
 
   /**
    * Present the native folder picker (iOS). Resolves to the picked folder, or

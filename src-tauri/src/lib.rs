@@ -39,6 +39,19 @@ struct VersionInfo {
     commit_date: String,
 }
 
+/// Filesystem metadata for one path, used by the frontend to notice files and
+/// folders that changed on disk behind the app's back.
+#[derive(Serialize, Debug)]
+struct PathStat {
+    /// Modification time in milliseconds since the Unix epoch (0 when the
+    /// platform cannot report one).
+    #[serde(rename = "mtimeMs")]
+    mtime_ms: f64,
+    size: u64,
+    #[serde(rename = "isDir")]
+    is_dir: bool,
+}
+
 /// Path of the config file shared with the CLI/TUI (mdcmd/config.json).
 fn config_file_path() -> Option<PathBuf> {
     dirs::config_dir().map(|mut p| {
@@ -424,6 +437,29 @@ fn search_directory(path: String, query: String) -> Result<Vec<FileEntry>, Strin
     Ok(results)
 }
 
+/// Stat several paths in one round trip: `None` for anything that does not
+/// exist (so a deleted file is reported rather than erroring). Used by the
+/// frontend's disk-change polling, which compares the returned mtime/size
+/// against what it last read and only re-reads when the two differ.
+#[tauri::command]
+fn path_stats(paths: Vec<String>) -> Vec<Option<PathStat>> {
+    paths
+        .iter()
+        .map(|path| {
+            std::fs::metadata(path).ok().map(|md| PathStat {
+                mtime_ms: md
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_millis() as f64)
+                    .unwrap_or(0.0),
+                size: md.len(),
+                is_dir: md.is_dir(),
+            })
+        })
+        .collect()
+}
+
 #[cfg(desktop)]
 struct PtySession {
     writer: Box<dyn Write + Send>,
@@ -756,6 +792,7 @@ pub fn run() {
             open_terminal,
             open_new_window,
             search_directory,
+            path_stats,
             spawn_pty,
             write_to_pty,
             resize_pty,
@@ -787,6 +824,7 @@ pub fn run() {
         read_quick_note_target,
         write_quick_note_target,
         search_directory,
+        path_stats,
         drain_opened_files,
         drain_quick_note_request,
         app_version_info

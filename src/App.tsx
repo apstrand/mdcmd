@@ -5,10 +5,11 @@ import FileBrowser from "./components/FileBrowser";
 import MarkdownEditor from "./components/MarkdownEditor";
 import MediaViewer from "./components/MediaViewer";
 import TerminalPane from "./components/TerminalPane";
-import { storage } from "./storage";
+import { storage, type PathStat } from "./storage";
+import { useDiskChanges, recordPathSignature } from "./hooks/useDiskChanges";
 import { displayRelativePath } from "./utils/paths";
 import { computeLineDiff, diffStats } from "./utils/diff";
-import { FileCode, Loader2, X, AlertCircle, RefreshCw, Copy, FileText, ChevronLeft, Diff, CheckCircle } from "lucide-react";
+import { FileCode, Loader2, X, AlertCircle, RefreshCw, Copy, FileText, ChevronLeft, Diff, CheckCircle, AlertTriangle } from "lucide-react";
 
 // True for the desktop (Tauri) build; false for the static web / Dropbox build.
 const isDesktop = storage.id === "tauri";
@@ -46,6 +47,21 @@ export default function App() {
   // onFocusAtEndHandled) right after consuming it, so reopening the same
   // file later through normal navigation doesn't re-trigger the jump.
   const [quickNoteFocusPath, setQuickNoteFocusPath] = useState<string | null>(null);
+  // On-disk change tracking for the open files. `diskSignaturesRef` holds the
+  // signature (mtime+size) each file had the last time the app itself read or
+  // wrote it, so the poll below can tell someone else's write apart from our
+  // own. `externalChanges` marks the files whose disk content the app could
+  // *not* silently adopt because the buffer has unsaved edits (or the file
+  // vanished) — those get a warning banner and a tab marker instead.
+  const diskSignaturesRef = useRef<Record<string, string>>({});
+  const [externalChanges, setExternalChanges] = useState<
+    Record<string, { kind: "changed" | "deleted"; diskContent?: string }>
+  >({});
+  // Bumped per file to force a fresh MarkdownEditor mount when content is
+  // replaced from disk underneath it (the editor seeds itself from
+  // `initialContent` once, so remounting is what makes a reload visible).
+  const [editorReloadKeys, setEditorReloadKeys] = useState<Record<string, number>>({});
+
   const [fileError, setFileError] = useState<string | null>(null);
   const [draggedTab, setDraggedTab] = useState<string | null>(null);
 
@@ -96,12 +112,28 @@ export default function App() {
   // Standalone "view changes" modal for the currently open file (separate from
   // the close/quit confirmation dialog's diff panel above).
   const [diffViewOpen, setDiffViewOpen] = useState(false);
+  // "View differences" from the outside-change banner: the version on disk
+  // against the (edited) one open here.
+  const [externalDiffOpen, setExternalDiffOpen] = useState(false);
   const currentFileData = selectedFile ? filesData[selectedFile] : undefined;
   const currentFileIsDirty = !!currentFileData && currentFileData.savedContent !== currentFileData.currentContent;
   const diffViewLines = useMemo(() => {
     if (!diffViewOpen || !currentFileData) return null;
     return computeLineDiff(currentFileData.savedContent, currentFileData.currentContent);
   }, [diffViewOpen, currentFileData]);
+
+  const externalDiskContent = selectedFile ? externalChanges[selectedFile]?.diskContent : undefined;
+  const externalDiffLines = useMemo(() => {
+    if (!externalDiffOpen || externalDiskContent === undefined || !currentFileData) return null;
+    return computeLineDiff(externalDiskContent, currentFileData.currentContent);
+  }, [externalDiffOpen, externalDiskContent, currentFileData]);
+
+  // Close the comparison as soon as there is nothing left to compare (the
+  // banner was dismissed, the file was reloaded or saved, or a different tab
+  // became active).
+  useEffect(() => {
+    if (externalDiskContent === undefined) setExternalDiffOpen(false);
+  }, [externalDiskContent]);
 
   const filesDataRef = useRef(filesData);
   useEffect(() => {
@@ -326,6 +358,92 @@ export default function App() {
     return /\.(png|jpe?g|gif|webp|svg|bmp|ico|mp4|webm|ogg|mov|mkv)$/i.test(path);
   };
 
+  // Remember what `path` looks like on disk right now, so the poll below can
+  // recognise the app's own read/write instead of reporting it as someone
+  // else's change. Best-effort: on a backend without `statPaths` nothing is
+  // recorded and nothing is polled.
+  const recordDiskSignature = (path: string) => recordPathSignature(diskSignaturesRef, path);
+
+  const clearExternalChange = (path: string) => {
+    setExternalChanges((prev) => {
+      if (!(path in prev)) return prev;
+      const next = { ...prev };
+      delete next[path];
+      return next;
+    });
+  };
+
+  // Replace a file's buffer with what's on disk and remount its editor.
+  const applyDiskContent = (path: string, content: string) => {
+    setFilesData((prev) => ({
+      ...prev,
+      [path]: { savedContent: content, currentContent: content },
+    }));
+    setEditorReloadKeys((prev) => ({ ...prev, [path]: (prev[path] ?? 0) + 1 }));
+    clearExternalChange(path);
+  };
+
+  // Discard the local edits and take the disk version (the banner's "Reload").
+  const reloadFromDisk = async (path: string) => {
+    try {
+      const content = await storage.readFile(path);
+      await recordDiskSignature(path);
+      applyDiskContent(path, content);
+    } catch (err) {
+      alert(`Error reloading file: ${err}`);
+    }
+  };
+
+  // Only text files have a buffer to keep in sync; media is left alone (the
+  // webview caches it by URL, so there is nothing useful to refresh).
+  const watchedFiles = useMemo(
+    () => openTabs.filter((path) => !isMediaFile(path)),
+    [openTabs],
+  );
+
+  // React to one of the open files changing on disk. A clean buffer just
+  // follows the file; a dirty one is never overwritten — it gets the warning
+  // banner so the user picks (see `externalChanges`).
+  const handleDiskChange = async (path: string, stat: PathStat | null) => {
+    if (!stat) {
+      setExternalChanges((prev) =>
+        prev[path]?.kind === "deleted" ? prev : { ...prev, [path]: { kind: "deleted" } },
+      );
+      return;
+    }
+    if (!filesDataRef.current[path]) return; // never loaded (or already closed)
+
+    let diskContent: string;
+    try {
+      diskContent = await storage.readFile(path);
+    } catch {
+      return; // mid-write or briefly unreadable — the next poll picks it up
+    }
+    const data = filesDataRef.current[path];
+    if (!data) return;
+
+    if (diskContent === data.currentContent) {
+      // Same text we already show (e.g. someone saved our own edits for us):
+      // nothing to warn about, and the buffer is no longer dirty.
+      setFilesData((prev) =>
+        prev[path] && prev[path].savedContent !== diskContent
+          ? { ...prev, [path]: { savedContent: diskContent, currentContent: diskContent } }
+          : prev,
+      );
+      clearExternalChange(path);
+      return;
+    }
+
+    if (data.savedContent === data.currentContent) {
+      applyDiskContent(path, diskContent);
+      return;
+    }
+
+    setExternalChanges((prev) => ({ ...prev, [path]: { kind: "changed", diskContent } }));
+  };
+
+  useDiskChanges(watchedFiles, diskSignaturesRef, handleDiskChange);
+
   // Load a file's content from local disk
   const handleSelectFile = async (filePath: string) => {
     setFileError(null);
@@ -355,6 +473,7 @@ export default function App() {
     setIsLoadingFile(true);
     try {
       const content = await storage.readFile(filePath);
+      await recordDiskSignature(filePath);
       setFilesData(prev => ({
         ...prev,
         [filePath]: { savedContent: content, currentContent: content }
@@ -447,6 +566,8 @@ export default function App() {
         delete next[pathToRemove];
         return next;
       });
+      delete diskSignaturesRef.current[pathToRemove];
+      clearExternalChange(pathToRemove);
 
       if (selectedFile === pathToRemove) {
         if (updatedTabs.length > 0) {
@@ -546,10 +667,14 @@ export default function App() {
   const handleSaveFile = async (filePath: string, content: string) => {
     try {
       await storage.writeFile(filePath, content);
+      await recordDiskSignature(filePath);
       setFilesData(prev => ({
         ...prev,
         [filePath]: { savedContent: content, currentContent: content }
       }));
+      // Our own write is now the version on disk, so any outside-change
+      // warning for this file is resolved.
+      clearExternalChange(filePath);
       flashSaved();
     } catch (err) {
       alert(`Error saving file: ${err}`);
@@ -577,6 +702,8 @@ export default function App() {
       await Promise.all(
         dirtyFiles.map(async ([path, data]) => {
           await storage.writeFile(path, data.currentContent);
+          await recordDiskSignature(path);
+          clearExternalChange(path);
         })
       );
       setFilesData(prev => {
@@ -881,6 +1008,18 @@ export default function App() {
                     onDragEnd={handleDragEnd}
                   >
                     <span className="tab-title">{name}</span>
+                    {externalChanges[path] && (
+                      <span
+                        className="tab-external-icon"
+                        title={
+                          externalChanges[path].kind === "deleted"
+                            ? "This file no longer exists on disk"
+                            : "This file changed on disk"
+                        }
+                      >
+                        <AlertTriangle className="w-3 h-3" />
+                      </span>
+                    )}
                     {isDirty && <span className="tab-dirty-dot" />}
                     <button
                       className="tab-close-btn"
@@ -939,6 +1078,55 @@ export default function App() {
           </div>
         )}
 
+        {/* Outside-change warning for the active file. Only reached when the
+            buffer has unsaved edits (or the file is gone) — an unedited file is
+            reloaded silently instead, with no banner. */}
+        {selectedFile && externalChanges[selectedFile] && (
+          <div className="external-change-banner">
+            <AlertTriangle className="w-4 h-4" style={{ flexShrink: 0 }} />
+            <span>
+              {externalChanges[selectedFile].kind === "deleted"
+                ? "This file no longer exists on disk. The version open here is untouched."
+                : "This file changed on disk while you were editing it."}
+            </span>
+            {externalChanges[selectedFile].kind === "deleted" ? (
+              <button
+                className="external-change-btn"
+                onClick={() => {
+                  const data = filesData[selectedFile];
+                  if (data) handleSaveFile(selectedFile, data.currentContent);
+                }}
+              >
+                Save to disk
+              </button>
+            ) : (
+              <>
+                <button
+                  className="external-change-btn"
+                  onClick={() => setExternalDiffOpen(true)}
+                  title="Compare the version on disk with the one open here"
+                >
+                  View differences
+                </button>
+                <button
+                  className="external-change-btn"
+                  onClick={() => reloadFromDisk(selectedFile)}
+                  title="Discard your edits and load the version on disk"
+                >
+                  Reload from disk
+                </button>
+              </>
+            )}
+            <button
+              className="external-change-dismiss-btn"
+              title="Keep my version"
+              onClick={() => clearExternalChange(selectedFile)}
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+        )}
+
         {/* Content Area */}
         <div style={{ flexGrow: 1, flexShrink: 1, flexBasis: 0, minHeight: 0, display: "flex", overflow: "hidden" }}>
           {isLoadingFile ? (
@@ -961,7 +1149,7 @@ export default function App() {
               <MediaViewer filePath={selectedFile} />
             ) : (
               <MarkdownEditor
-                key={selectedFile}
+                key={`${selectedFile}#${editorReloadKeys[selectedFile] ?? 0}`}
                 filePath={selectedFile}
                 pathLabel={displayRelativePath(selectedFile, pinnedShortcuts)}
                 initialContent={filesData[selectedFile]?.currentContent || ""}
@@ -1093,6 +1281,54 @@ export default function App() {
                   Cancel
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Disk-vs-buffer comparison opened from the outside-change banner */}
+      {externalDiffOpen && externalDiskContent !== undefined && (
+        <div className="confirm-modal-overlay" onClick={() => setExternalDiffOpen(false)}>
+          <div className="confirm-modal with-diff" onClick={(e) => e.stopPropagation()}>
+            <h3>Version on disk vs. yours</h3>
+            <p>Lines marked + are only in your open version, − only in the file on disk.</p>
+            <div className="confirm-diff-section">
+              <div className="confirm-diff-view">
+                {externalDiffLines && externalDiffLines.length === 0 ? (
+                  <div className="diff-empty">No line changes</div>
+                ) : (
+                  externalDiffLines?.map((line, idx) => (
+                    <div key={idx} className={`diff-line diff-${line.type}`}>
+                      <span className="diff-gutter">
+                        {line.type === "add" ? "+" : line.type === "del" ? "−" : " "}
+                      </span>
+                      <span className="diff-text">{line.text || " "}</span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+            <div className="confirm-modal-actions">
+              <button
+                className="confirm-btn-secondary"
+                onClick={() => {
+                  setExternalDiffOpen(false);
+                  if (selectedFile) reloadFromDisk(selectedFile);
+                }}
+              >
+                Reload from disk
+              </button>
+              <button
+                className="confirm-btn-primary"
+                onClick={() => {
+                  // Deciding to keep the local version also settles the
+                  // warning, so the banner and tab marker go with the modal.
+                  setExternalDiffOpen(false);
+                  if (selectedFile) clearExternalChange(selectedFile);
+                }}
+              >
+                Keep mine
+              </button>
             </div>
           </div>
         </div>
