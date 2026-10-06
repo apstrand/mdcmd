@@ -8,4 +8,10 @@ DerivedData/
 .netrc
 
 /xtool
+
+# The xtool-generated project is throwaway, but Mdcmd.xcodeproj is the
+# committed project the ios-testflight workflow archives — keep that one.
 *.xcodeproj
+!Mdcmd.xcodeproj
+Mdcmd.xcodeproj/project.xcworkspace/xcuserdata/
+Mdcmd.xcodeproj/xcuserdata/

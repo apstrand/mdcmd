@@ -1,0 +1,346 @@
+// \!$*UTF8*$\!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		B20000000000000000000002 /* MdcmdApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000001 /* MdcmdApp.swift */; };
+		B20000000000000000000004 /* WelcomeDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000003 /* WelcomeDocument.swift */; };
+		B20000000000000000000006 /* MarkdownBlock.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000005 /* MarkdownBlock.swift */; };
+		B20000000000000000000008 /* MarkdownHighlighter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000007 /* MarkdownHighlighter.swift */; };
+		B2000000000000000000000A /* MarkdownPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000009 /* MarkdownPreview.swift */; };
+		B2000000000000000000000C /* MarkdownTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000B /* MarkdownTheme.swift */; };
+		B2000000000000000000000E /* DocumentSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000D /* DocumentSession.swift */; };
+		B20000000000000000000010 /* FileEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000F /* FileEntry.swift */; };
+		B20000000000000000000012 /* PinnedItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000011 /* PinnedItem.swift */; };
+		B20000000000000000000014 /* FileService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000013 /* FileService.swift */; };
+		B20000000000000000000016 /* LocalStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000015 /* LocalStore.swift */; };
+		B20000000000000000000018 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000017 /* AppState.swift */; };
+		B2000000000000000000001A /* BookmarkStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000019 /* BookmarkStore.swift */; };
+		B2000000000000000000001C /* Prefs.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000001B /* Prefs.swift */; };
+		B2000000000000000000001E /* BrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000001D /* BrowserView.swift */; };
+		B20000000000000000000020 /* DocumentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000001F /* DocumentView.swift */; };
+		B20000000000000000000022 /* FileRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000021 /* FileRow.swift */; };
+		B20000000000000000000024 /* FolderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000023 /* FolderView.swift */; };
+		B20000000000000000000026 /* MarkdownTextEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000025 /* MarkdownTextEditor.swift */; };
+		B20000000000000000000028 /* MediaView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000027 /* MediaView.swift */; };
+		B2000000000000000000002A /* Route.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000029 /* Route.swift */; };
+		B2000000000000000000002C /* TourInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000002B /* TourInfo.swift */; };
+		AA00000000000000000014 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA00000000000000000011 /* Assets.xcassets */; };
+		AA00000000000000000015 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = AA00000000000000000012 /* PrivacyInfo.xcprivacy */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		B10000000000000000000001 /* MdcmdApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MdcmdApp.swift; path = Sources/Mdcmd/MdcmdApp.swift; sourceTree = SOURCE_ROOT; };
+		B10000000000000000000003 /* WelcomeDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = WelcomeDocument.swift; path = Sources/Mdcmd/WelcomeDocument.swift; sourceTree = SOURCE_ROOT; };
+		B10000000000000000000005 /* MarkdownBlock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MarkdownBlock.swift; path = Sources/Mdcmd/Markdown/MarkdownBlock.swift; sourceTree = SOURCE_ROOT; };
+		B10000000000000000000007 /* MarkdownHighlighter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MarkdownHighlighter.swift; path = Sources/Mdcmd/Markdown/MarkdownHighlighter.swift; sourceTree = SOURCE_ROOT; };
+		B10000000000000000000009 /* MarkdownPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MarkdownPreview.swift; path = Sources/Mdcmd/Markdown/MarkdownPreview.swift; sourceTree = SOURCE_ROOT; };
+		B1000000000000000000000B /* MarkdownTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MarkdownTheme.swift; path = Sources/Mdcmd/Markdown/MarkdownTheme.swift; sourceTree = SOURCE_ROOT; };
+		B1000000000000000000000D /* DocumentSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DocumentSession.swift; path = Sources/Mdcmd/Models/DocumentSession.swift; sourceTree = SOURCE_ROOT; };
+		B1000000000000000000000F /* FileEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = FileEntry.swift; path = Sources/Mdcmd/Models/FileEntry.swift; sourceTree = SOURCE_ROOT; };
+		B10000000000000000000011 /* PinnedItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = PinnedItem.swift; path = Sources/Mdcmd/Models/PinnedItem.swift; sourceTree = SOURCE_ROOT; };
+		B10000000000000000000013 /* FileService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = FileService.swift; path = Sources/Mdcmd/Services/FileService.swift; sourceTree = SOURCE_ROOT; };
+		B10000000000000000000015 /* LocalStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = LocalStore.swift; path = Sources/Mdcmd/Services/LocalStore.swift; sourceTree = SOURCE_ROOT; };
+		B10000000000000000000017 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppState.swift; path = Sources/Mdcmd/State/AppState.swift; sourceTree = SOURCE_ROOT; };
+		B10000000000000000000019 /* BookmarkStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = BookmarkStore.swift; path = Sources/Mdcmd/State/BookmarkStore.swift; sourceTree = SOURCE_ROOT; };
+		B1000000000000000000001B /* Prefs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Prefs.swift; path = Sources/Mdcmd/State/Prefs.swift; sourceTree = SOURCE_ROOT; };
+		B1000000000000000000001D /* BrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = BrowserView.swift; path = Sources/Mdcmd/Views/BrowserView.swift; sourceTree = SOURCE_ROOT; };
+		B1000000000000000000001F /* DocumentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DocumentView.swift; path = Sources/Mdcmd/Views/DocumentView.swift; sourceTree = SOURCE_ROOT; };
+		B10000000000000000000021 /* FileRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = FileRow.swift; path = Sources/Mdcmd/Views/FileRow.swift; sourceTree = SOURCE_ROOT; };
+		B10000000000000000000023 /* FolderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = FolderView.swift; path = Sources/Mdcmd/Views/FolderView.swift; sourceTree = SOURCE_ROOT; };
+		B10000000000000000000025 /* MarkdownTextEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MarkdownTextEditor.swift; path = Sources/Mdcmd/Views/MarkdownTextEditor.swift; sourceTree = SOURCE_ROOT; };
+		B10000000000000000000027 /* MediaView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MediaView.swift; path = Sources/Mdcmd/Views/MediaView.swift; sourceTree = SOURCE_ROOT; };
+		B10000000000000000000029 /* Route.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Route.swift; path = Sources/Mdcmd/Views/Route.swift; sourceTree = SOURCE_ROOT; };
+		B1000000000000000000002B /* TourInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TourInfo.swift; path = Sources/Mdcmd/Views/TourInfo.swift; sourceTree = SOURCE_ROOT; };
+		AA00000000000000000011 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Mdcmd/Assets.xcassets; sourceTree = SOURCE_ROOT; };
+		AA00000000000000000012 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = Mdcmd/PrivacyInfo.xcprivacy; sourceTree = SOURCE_ROOT; };
+		AA00000000000000000013 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Mdcmd/Info.plist; sourceTree = SOURCE_ROOT; };
+		AA0000000000000000000A /* Mdcmd.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Mdcmd.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		AA00000000000000000009 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		AA00000000000000000002 = {
+			isa = PBXGroup;
+			children = (
+				AA00000000000000000003 /* Sources */,
+				AA00000000000000000004 /* Mdcmd */,
+				AA00000000000000000005 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		AA00000000000000000003 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				B10000000000000000000001 /* MdcmdApp.swift */,
+				B10000000000000000000003 /* WelcomeDocument.swift */,
+				B10000000000000000000005 /* MarkdownBlock.swift */,
+				B10000000000000000000007 /* MarkdownHighlighter.swift */,
+				B10000000000000000000009 /* MarkdownPreview.swift */,
+				B1000000000000000000000B /* MarkdownTheme.swift */,
+				B1000000000000000000000D /* DocumentSession.swift */,
+				B1000000000000000000000F /* FileEntry.swift */,
+				B10000000000000000000011 /* PinnedItem.swift */,
+				B10000000000000000000013 /* FileService.swift */,
+				B10000000000000000000015 /* LocalStore.swift */,
+				B10000000000000000000017 /* AppState.swift */,
+				B10000000000000000000019 /* BookmarkStore.swift */,
+				B1000000000000000000001B /* Prefs.swift */,
+				B1000000000000000000001D /* BrowserView.swift */,
+				B1000000000000000000001F /* DocumentView.swift */,
+				B10000000000000000000021 /* FileRow.swift */,
+				B10000000000000000000023 /* FolderView.swift */,
+				B10000000000000000000025 /* MarkdownTextEditor.swift */,
+				B10000000000000000000027 /* MediaView.swift */,
+				B10000000000000000000029 /* Route.swift */,
+				B1000000000000000000002B /* TourInfo.swift */,
+			);
+			name = Sources;
+			sourceTree = "<group>";
+		};
+		AA00000000000000000004 /* Mdcmd */ = {
+			isa = PBXGroup;
+			children = (
+				AA00000000000000000013 /* Info.plist */,
+				AA00000000000000000011 /* Assets.xcassets */,
+				AA00000000000000000012 /* PrivacyInfo.xcprivacy */,
+			);
+			name = Mdcmd;
+			sourceTree = "<group>";
+		};
+		AA00000000000000000005 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				AA0000000000000000000A /* Mdcmd.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		AA00000000000000000006 /* Mdcmd */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AA0000000000000000000C /* Build configuration list for PBXNativeTarget "Mdcmd" */;
+			buildPhases = (
+				AA00000000000000000007 /* Sources */,
+				AA00000000000000000009 /* Frameworks */,
+				AA00000000000000000008 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Mdcmd;
+			productName = Mdcmd;
+			productReference = AA0000000000000000000A /* Mdcmd.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		AA00000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2700;
+				LastUpgradeCheck = 2700;
+				TargetAttributes = {
+					AA00000000000000000006 = {
+						CreatedOnToolsVersion = 27.0;
+					};
+				};
+			};
+			buildConfigurationList = AA0000000000000000000B /* Build configuration list for PBXProject "Mdcmd" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = AA00000000000000000002;
+			productRefGroup = AA00000000000000000005 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				AA00000000000000000006 /* Mdcmd */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		AA00000000000000000008 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AA00000000000000000014 /* Assets.xcassets in Resources */,
+				AA00000000000000000015 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		AA00000000000000000007 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B20000000000000000000002 /* MdcmdApp.swift in Sources */,
+				B20000000000000000000004 /* WelcomeDocument.swift in Sources */,
+				B20000000000000000000006 /* MarkdownBlock.swift in Sources */,
+				B20000000000000000000008 /* MarkdownHighlighter.swift in Sources */,
+				B2000000000000000000000A /* MarkdownPreview.swift in Sources */,
+				B2000000000000000000000C /* MarkdownTheme.swift in Sources */,
+				B2000000000000000000000E /* DocumentSession.swift in Sources */,
+				B20000000000000000000010 /* FileEntry.swift in Sources */,
+				B20000000000000000000012 /* PinnedItem.swift in Sources */,
+				B20000000000000000000014 /* FileService.swift in Sources */,
+				B20000000000000000000016 /* LocalStore.swift in Sources */,
+				B20000000000000000000018 /* AppState.swift in Sources */,
+				B2000000000000000000001A /* BookmarkStore.swift in Sources */,
+				B2000000000000000000001C /* Prefs.swift in Sources */,
+				B2000000000000000000001E /* BrowserView.swift in Sources */,
+				B20000000000000000000020 /* DocumentView.swift in Sources */,
+				B20000000000000000000022 /* FileRow.swift in Sources */,
+				B20000000000000000000024 /* FolderView.swift in Sources */,
+				B20000000000000000000026 /* MarkdownTextEditor.swift in Sources */,
+				B20000000000000000000028 /* MediaView.swift in Sources */,
+				B2000000000000000000002A /* Route.swift in Sources */,
+				B2000000000000000000002C /* TourInfo.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		AA0000000000000000000F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Mdcmd/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.13;
+				PRODUCT_BUNDLE_IDENTIFIER = com.mdcmd.app;
+				PRODUCT_NAME = Mdcmd;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		AA00000000000000000010 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Mdcmd/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.13;
+				PRODUCT_BUNDLE_IDENTIFIER = com.mdcmd.app;
+				PRODUCT_NAME = Mdcmd;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		AA0000000000000000000D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		AA0000000000000000000E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		AA0000000000000000000C /* Build configuration list for PBXNativeTarget "Mdcmd" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA0000000000000000000F /* Debug */,
+				AA00000000000000000010 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AA0000000000000000000B /* Build configuration list for PBXProject "Mdcmd" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA0000000000000000000D /* Debug */,
+				AA0000000000000000000E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = AA00000000000000000001 /* Project object */;
+}

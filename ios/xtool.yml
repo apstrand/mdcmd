@@ -1,5 +1,5 @@
 version: 1
-bundleID: com.mdcmd.ios
+bundleID: com.mdcmd.app
 product: Mdcmd
 deploymentTarget: "17.0"
 infoPath: Mdcmd-Info.plist
