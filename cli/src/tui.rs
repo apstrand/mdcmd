@@ -200,6 +200,9 @@ pub struct AppState {
     /// resumes. Raw mode disables the kernel's own SIGTSTP delivery for
     /// Ctrl-Z, so without this the keypress would just be swallowed.
     pub suspend_requested: bool,
+    /// Set by `U` on the help/welcome screen; `main.rs` leaves the TUI, runs
+    /// the self-update and restarts.
+    pub update_requested: bool,
     /// Set when a command-line file argument was just created because it
     /// didn't exist yet (see `main.rs::prompt_create_missing_path`).
     /// Consumed by `main.rs` right after the first draw — by which point
@@ -328,6 +331,7 @@ impl AppState {
             watched_file_dir: None,
             suppress_images_this_frame: false,
             suspend_requested: false,
+            update_requested: false,
             pending_edit: false,
         };
 
@@ -1371,6 +1375,28 @@ impl AppState {
             }
         }
         
+        // `U` / `C` act on the install info shown on the help and welcome
+        // screens, so they only do anything while that info is on screen.
+        if self.help_active || self.selected_file.is_none() {
+            match key.code {
+                KeyCode::Char('U') => {
+                    match crate::install::cached_status() {
+                        Some(s) if s.update_command().is_some() => self.update_requested = true,
+                        Some(_) => self.error = Some("Don't know how to update this install".to_string()),
+                        None => self.status_message = Some("Still checking install status…".to_string()),
+                    }
+                    return true;
+                }
+                KeyCode::Char('C') => {
+                    if let Some(cmd) = crate::install::cached_status().and_then(|s| s.update_command()) {
+                        self.copy_to_clipboard(&cmd);
+                    }
+                    return true;
+                }
+                _ => {}
+            }
+        }
+
         if key.code == KeyCode::Char('?') && !self.search_active && !self.create_active {
             self.help_active = !self.help_active;
             return true;
@@ -3353,6 +3379,10 @@ impl AppState {
                     Style::default().fg(text_secondary_color),
                 )
             ]),
+        ]
+        .into_iter()
+        .chain(self.install_info_lines(accent_color, text_primary_color, text_secondary_color))
+        .chain(vec![
             Line::from(""),
             Line::from(vec![
                 Span::styled("    No File Open.", Style::default().fg(text_primary_color).add_modifier(Modifier::BOLD))
@@ -3450,7 +3480,50 @@ impl AppState {
                 Span::styled("    q / Ctrl-q      : ", Style::default().fg(text_secondary_color)),
                 Span::styled("Quit application", Style::default().fg(text_primary_color))
             ]),
-        ]
+        ])
+        .collect()
+    }
+
+    /// Install source, whether the source has moved on since this binary was
+    /// built, and how to update. Shown under the version line.
+    fn install_info_lines(&self, accent_color: Color, text_primary_color: Color, text_secondary_color: Color) -> Vec<Line<'static>> {
+        let dim = Style::default().fg(text_secondary_color);
+        let key = Style::default().fg(accent_color).add_modifier(Modifier::BOLD);
+        let Some(status) = crate::install::cached_status() else {
+            return vec![Line::from(Span::styled("    Checking install status…", dim))];
+        };
+
+        let mut lines = vec![Line::from(vec![
+            Span::styled("    Installed from: ", dim),
+            Span::styled(status.source_line(), Style::default().fg(text_primary_color)),
+        ])];
+
+        let status_style = if status.is_outdated() {
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        } else {
+            dim
+        };
+        let mark = if status.is_outdated() { "⚠ " } else if status.checked { "✓ " } else { "" };
+        lines.push(Line::from(vec![
+            Span::styled("    Status:         ", dim),
+            Span::styled(format!("{mark}{}", status.pending_line()), status_style),
+        ]));
+
+        if let Some(cmd) = status.update_command() {
+            lines.push(Line::from(vec![
+                Span::styled("    Update:         ", dim),
+                Span::styled(cmd, Style::default().fg(text_primary_color)),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("                    ", dim),
+                Span::styled("U", key),
+                Span::styled(" update & restart now  ·  ", dim),
+                Span::styled("C", key),
+                Span::styled(" copy command  ·  or run ", dim),
+                Span::styled("mdc --self-update", key),
+            ]));
+        }
+        lines
     }
 }
 

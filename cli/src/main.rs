@@ -12,6 +12,7 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 use anyhow::Result;
 
 mod config;
+mod install;
 mod markdown;
 mod palette;
 mod termquery;
@@ -35,7 +36,8 @@ ARGS:
 OPTIONS:
     -g, --gui          Open the file (or current directory) in the MarkDown Commander GUI and exit
     -h, --help         Print help information
-    -v, --version      Print version information
+    -v, --version      Print version information, install source and whether it's out of date
+        --self-update  Update this install (rebuild from its local checkout, or reinstall from crates.io/git)
         --debug-image  Print detected terminal image-protocol capabilities and exit";
 
 /// Version line shared by `-v`/`--version` and the top of `-h`/`--help`, and
@@ -156,6 +158,48 @@ fn suspend(terminal: &mut Tui) -> Result<()> {
     Ok(())
 }
 
+/// Leaves the TUI, runs `--self-update` in the plain terminal, and on success
+/// replaces this process with the freshly built binary (reopening the current
+/// file or folder). On failure, waits for Enter and returns to the TUI.
+fn run_update_and_restart(terminal: &mut Tui, app: &AppState) -> Result<()> {
+    disable_raw_mode()?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen, Show)?;
+
+    let updated = match install::self_update() {
+        Ok(ok) => ok,
+        Err(e) => {
+            eprintln!("mdc: {e}");
+            false
+        }
+    };
+
+    if updated {
+        let reopen = app.selected_file.clone().unwrap_or_else(|| app.current_dir.clone());
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            // Use the path resolved at startup: once the binary has been
+            // replaced, `current_exe()` on Linux reports "<path> (deleted)".
+            if let Some(exe) = install::status().exe.clone() {
+                println!("\nUpdated — restarting mdc…");
+                // `exec` only returns on failure.
+                let err = std::process::Command::new(exe).arg(&reopen).exec();
+                eprintln!("mdc: couldn't restart: {err}");
+            }
+        }
+        #[cfg(not(unix))]
+        let _ = reopen;
+        println!("\nUpdated. Restart mdc to use the new version.");
+    }
+    print!("\nPress Enter to return to mdc… ");
+    let _ = io::Write::flush(&mut io::stdout());
+    let _ = io::stdin().read_line(&mut String::new());
+
+    enable_raw_mode()?;
+    execute!(terminal.backend_mut(), EnterAlternateScreen, Hide)?;
+    Ok(())
+}
+
 /// Repaints the whole screen in the app's background color and makes the next
 /// draw redraw every cell.
 ///
@@ -223,8 +267,21 @@ fn main() -> Result<()> {
                 return Ok(());
             }
             "-v" | "--version" => {
-                println!("{}", version_line());
+                println!("{}\n{}", version_line(), install::version_details());
                 return Ok(());
+            }
+            "--self-update" => {
+                return match install::self_update() {
+                    Ok(true) => {
+                        println!("\nUpdated.");
+                        Ok(())
+                    }
+                    Ok(false) => std::process::exit(1),
+                    Err(e) => {
+                        eprintln!("mdc: {e}");
+                        std::process::exit(1)
+                    }
+                };
             }
             "--debug-image" => {
                 debug_image();
@@ -262,6 +319,12 @@ fn main() -> Result<()> {
     } else {
         std::env::current_dir().ok()
     };
+
+    // Work out the install source / pending changes off the UI thread; the
+    // help screen shows it once it's ready.
+    std::thread::spawn(|| {
+        install::status();
+    });
 
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
@@ -360,6 +423,11 @@ fn main() -> Result<()> {
                     if app.suspend_requested {
                         app.suspend_requested = false;
                         suspend(&mut terminal)?;
+                        app.needs_clear = true;
+                    }
+                    if app.update_requested {
+                        app.update_requested = false;
+                        run_update_and_restart(&mut terminal, &app)?;
                         app.needs_clear = true;
                     }
                 }
