@@ -71,9 +71,9 @@
          - Set GitHubClientID to the OAuth App's client id and GitHubOAuthProxy
            to the deployed Worker's URL. -->
   <key>GitHubClientID</key>
-  <string></string>
+  <string>Ov23litXLjNNx01eyu1V</string>
   <key>GitHubOAuthProxy</key>
-  <string></string>
+  <string>https://mdcmd-github-oauth.2615.workers.dev</string>
   <key>GitHubRedirectURI</key>
   <string>mdcmd://oauth/github</string>
 

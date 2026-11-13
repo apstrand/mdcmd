@@ -107,9 +107,9 @@
 	     https://github.com/settings/developers, add mdcmd://oauth/github as a
 	     callback URL, then set the client id + the deployed Worker's URL here. -->
 	<key>GitHubClientID</key>
-	<string></string>
+	<string>Ov23litXLjNNx01eyu1V</string>
 	<key>GitHubOAuthProxy</key>
-	<string></string>
+	<string>https://mdcmd-github-oauth.2615.workers.dev</string>
 	<key>GitHubRedirectURI</key>
 	<string>mdcmd://oauth/github</string>
 
