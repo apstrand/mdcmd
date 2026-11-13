@@ -7,19 +7,50 @@ import AVKit
 struct MediaView: View {
     let entry: FileEntry
 
+    /// The URL actually handed to the image/video view. For local files it's the
+    /// entry's own file URL; for GitHub the bytes are fetched and written to a
+    /// temp file (`AVPlayer`/`UIImage` can't carry an auth header to a remote).
+    @State private var localURL: URL?
+    @State private var loadError: String?
+
     var body: some View {
         Group {
-            switch entry.kind {
-            case .video:
-                VideoPlayer(player: AVPlayer(url: entry.url))
-                    .ignoresSafeArea(edges: .bottom)
-            default:
-                ZoomableImage(url: entry.url)
+            if let loadError {
+                ContentUnavailableView(
+                    "Can't Load Media", systemImage: "exclamationmark.triangle",
+                    description: Text(loadError))
+            } else if let localURL {
+                switch entry.kind {
+                case .video:
+                    VideoPlayer(player: AVPlayer(url: localURL))
+                        .ignoresSafeArea(edges: .bottom)
+                default:
+                    ZoomableImage(url: localURL)
+                }
+            } else {
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .navigationTitle(entry.name)
         .navigationBarTitleDisplayMode(.inline)
         .background(Color(.systemBackground))
+        .task(id: entry.id) { await resolve() }
+    }
+
+    private func resolve() async {
+        if !entry.url.isGitHub {
+            localURL = entry.url
+            return
+        }
+        do {
+            let data = try await GitHubService.shared.rawData(entry.url)
+            let tmp = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString + "-" + entry.name)
+            try data.write(to: tmp)
+            localURL = tmp
+        } catch {
+            loadError = error.localizedDescription
+        }
     }
 }
 

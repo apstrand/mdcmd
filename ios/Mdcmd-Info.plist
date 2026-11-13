@@ -62,7 +62,23 @@
     </dict>
   </array>
 
-  <!-- Custom scheme for the Quick Note widget deep link (mdcmd://quicknote). -->
+  <!-- GitHub connection (optional). Mirrors the web build's VITE_GITHUB_* env
+       vars. These are public values (no secret — the client secret lives in the
+       OAuth proxy Worker, server/github-oauth-worker/). Leave GitHubClientID or
+       GitHubOAuthProxy blank to hide GitHub entirely.
+         - Create an OAuth App at https://github.com/settings/developers and add
+           mdcmd://oauth/github as a callback URL.
+         - Set GitHubClientID to the OAuth App's client id and GitHubOAuthProxy
+           to the deployed Worker's URL. -->
+  <key>GitHubClientID</key>
+  <string></string>
+  <key>GitHubOAuthProxy</key>
+  <string></string>
+  <key>GitHubRedirectURI</key>
+  <string>mdcmd://oauth/github</string>
+
+  <!-- Custom scheme for the Quick Note widget deep link (mdcmd://quicknote) and
+       the GitHub OAuth callback (mdcmd://oauth/github). -->
   <key>CFBundleURLTypes</key>
   <array>
     <dict>

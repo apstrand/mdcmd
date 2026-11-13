@@ -11,6 +11,7 @@ struct FolderView: View {
     @State private var entries: [FileEntry] = []
     @State private var loadError: String?
     @State private var searchText = ""
+    @State private var searchResults: [FileEntry] = []
     @State private var creating: CreateKind?
     @State private var newName = ""
     @State private var actionError: String?
@@ -22,10 +23,12 @@ struct FolderView: View {
         var placeholder: String { self == .file ? "note.md" : "folder name" }
     }
 
+    private var isSearching: Bool {
+        !searchText.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
     private var visible: [FileEntry] {
-        let q = searchText.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return entries }
-        return FileService.search(root: folder, query: q)
+        isSearching ? searchResults : entries
     }
 
     var body: some View {
@@ -47,7 +50,7 @@ struct FolderView: View {
             }
         }
         .listStyle(.plain)
-        .navigationTitle(LocalStore.isDocumentsRoot(folder) ? LocalStore.displayName : folder.lastPathComponent)
+        .navigationTitle(folderTitle)
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .automatic))
         .toolbar {
@@ -60,8 +63,9 @@ struct FolderView: View {
                 }
             }
         }
-        .task(id: folder) { reload() }
-        .refreshable { reload() }
+        .task(id: folder) { await reload() }
+        .task(id: searchText) { await runSearch() }
+        .refreshable { await reload() }
         .alert(creating?.title ?? "", isPresented: creatingBinding) {
             TextField(creating?.placeholder ?? "", text: $newName)
                 .textInputAutocapitalization(.never)
@@ -78,13 +82,26 @@ struct FolderView: View {
 
     // MARK: Data
 
-    private func reload() {
+    private var folderTitle: String {
+        if folder.isGitHub {
+            return folder == githubRoot ? "GitHub" : folder.lastPathComponent
+        }
+        return LocalStore.isDocumentsRoot(folder) ? LocalStore.displayName : folder.lastPathComponent
+    }
+
+    private func reload() async {
         do {
-            entries = try FileService.list(folder)
+            entries = try await FileService.list(folder)
             loadError = nil
         } catch {
             loadError = error.localizedDescription
         }
+    }
+
+    private func runSearch() async {
+        let q = searchText.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { searchResults = []; return }
+        searchResults = await FileService.search(root: folder, query: q)
     }
 
     /// For search results, show the path relative to this folder as a subtitle.
@@ -114,19 +131,21 @@ struct FolderView: View {
         creating = nil
         let name = newName.trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty, let kind else { return }
-        do {
-            switch kind {
-            case .folder:
-                _ = try FileService.createFolder(in: folder, named: name)
-                reload()
-            case .file:
-                let fileName = name.contains(".") ? name : name + ".md"
-                let url = try FileService.createFile(in: folder, named: fileName)
-                reload()
-                app.open(FileEntry(url: url, isDirectory: false))
+        Task {
+            do {
+                switch kind {
+                case .folder:
+                    _ = try await FileService.createFolder(in: folder, named: name)
+                    await reload()
+                case .file:
+                    let fileName = name.contains(".") ? name : name + ".md"
+                    let url = try await FileService.createFile(in: folder, named: fileName)
+                    await reload()
+                    app.open(FileEntry(url: url, isDirectory: false))
+                }
+            } catch {
+                actionError = error.localizedDescription
             }
-        } catch {
-            actionError = error.localizedDescription
         }
     }
 }

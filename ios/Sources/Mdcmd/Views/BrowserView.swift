@@ -142,6 +142,8 @@ private struct HomeList: View {
     @EnvironmentObject private var app: AppState
     @StateObject private var tree = ShortcutTree()
     @State private var showingHelp = false
+    @State private var connectingGitHub = false
+    @State private var gitHubError: String?
     let onAddFolder: () -> Void
     let onAddFile: () -> Void
 
@@ -182,6 +184,10 @@ private struct HomeList: View {
                 Text("Add folders or files from Files, iCloud Drive, Dropbox, or Google Drive with the + button above.")
             }
 
+            if app.isGitHubConfigured {
+                gitHubSection
+            }
+
             if showTour {
                 Section("What you can do") {
                     ForEach(TourTopic.allCases) { topic in
@@ -215,6 +221,89 @@ private struct HomeList: View {
             }
         }
         .sheet(isPresented: $showingHelp) { HelpView() }
+        .alert("GitHub", isPresented: .constant(gitHubError != nil)) {
+            Button("OK") { gitHubError = nil }
+        } message: {
+            Text(gitHubError ?? "")
+        }
+    }
+
+    // MARK: GitHub
+
+    /// Connect-or-browse row for GitHub, shown only when the build is configured
+    /// with an OAuth client id + proxy. The native counterpart of the web build's
+    /// GitHub provider surfaced in the file browser.
+    @ViewBuilder
+    private var gitHubSection: some View {
+        Section {
+            if app.isGitHubConnected {
+                Button {
+                    app.open(FileEntry(url: githubRoot, isDirectory: true))
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "chevron.left.forwardslash.chevron.right")
+                            .foregroundStyle(Color.accentColor)
+                            .frame(width: 22)
+                        Text("GitHub").foregroundStyle(.primary)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .swipeActions(edge: .trailing) {
+                    Button(role: .destructive) {
+                        app.disconnectGitHub()
+                    } label: {
+                        Label("Disconnect", systemImage: "rectangle.portrait.and.arrow.right")
+                    }
+                }
+            } else {
+                Button {
+                    connectGitHub()
+                } label: {
+                    HStack(spacing: 12) {
+                        if connectingGitHub {
+                            ProgressView().frame(width: 22)
+                        } else {
+                            Image(systemName: "chevron.left.forwardslash.chevron.right")
+                                .foregroundStyle(Color.accentColor)
+                                .frame(width: 22)
+                        }
+                        Text("Connect GitHub…").foregroundStyle(.primary)
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(connectingGitHub)
+            }
+        } header: {
+            Text("GitHub")
+        } footer: {
+            if app.isGitHubConnected {
+                Text("Browse your repositories and edit Markdown in place. Pin a repo or file to add it to Shortcuts.")
+            } else {
+                Text("Sign in to browse your repositories and edit Markdown files, just like the web app.")
+            }
+        }
+    }
+
+    private func connectGitHub() {
+        connectingGitHub = true
+        Task {
+            defer { connectingGitHub = false }
+            do {
+                try await app.connectGitHub()
+            } catch is CancellationError {
+                // user dismissed; stay quiet
+            } catch {
+                if case GitHubError.cancelled = error { return }
+                gitHubError = error.localizedDescription
+            }
+        }
     }
 
     // MARK: Pieces
@@ -400,7 +489,7 @@ private final class ShortcutTree: ObservableObject {
         guard childrenByPath[path] == nil, !loading.contains(path) else { return }
         loading.insert(path)
         Task {
-            let entries = (try? FileService.list(url)) ?? []
+            let entries = (try? await FileService.list(url)) ?? []
             childrenByPath[path] = entries
             loading.remove(path)
         }

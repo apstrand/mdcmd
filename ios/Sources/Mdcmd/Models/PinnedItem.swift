@@ -11,6 +11,7 @@ struct PinnedItem: Identifiable, Codable, Hashable {
     let isDir: Bool
 
     var id: String { path }
-    var url: URL { URL(fileURLWithPath: path) }
+    var url: URL { resourceURL(path) }
     var name: String { url.lastPathComponent }
+    var isGitHub: Bool { url.isGitHub }
 }

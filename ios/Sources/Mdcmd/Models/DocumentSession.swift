@@ -6,7 +6,7 @@ import Foundation
 @MainActor
 final class DocumentSession: ObservableObject, Identifiable {
     let path: String
-    var url: URL { URL(fileURLWithPath: path) }
+    var url: URL { resourceURL(path) }
     nonisolated var id: String { path }
     var name: String { url.lastPathComponent }
 
@@ -16,31 +16,58 @@ final class DocumentSession: ObservableObject, Identifiable {
     @Published private(set) var savedText: String
     /// Non-nil when the file couldn't be read.
     @Published var loadError: String?
+    /// True while the initial content is still being fetched (GitHub only — local
+    /// files load synchronously, so they're never in this state).
+    @Published private(set) var isLoading: Bool
 
     var isDirty: Bool { text != savedText }
 
-    init(path: String, text: String, loadError: String? = nil) {
+    init(path: String, text: String, loadError: String? = nil, isLoading: Bool = false) {
         self.path = path
         self.text = text
         self.savedText = text
         self.loadError = loadError
+        self.isLoading = isLoading
     }
 
-    /// Load a session from disk. Never throws — a read failure is surfaced via
-    /// `loadError` so the view can show a friendly message (binary file, etc.).
+    /// Create a session for a path. Local files are read synchronously (no empty
+    /// flash); GitHub documents come back empty + loading and fetch themselves in
+    /// the background. A read failure is surfaced via `loadError` so the view can
+    /// show a friendly message (binary file, etc.) rather than throwing.
     static func load(path: String) -> DocumentSession {
+        let url = resourceURL(path)
+        if url.isGitHub {
+            let session = DocumentSession(path: path, text: "", isLoading: true)
+            Task { await session.reload() }
+            return session
+        }
         do {
-            let text = try FileService.read(URL(fileURLWithPath: path))
+            let text = try FileService.readLocal(url)
             return DocumentSession(path: path, text: text)
         } catch {
             return DocumentSession(path: path, text: "", loadError: error.localizedDescription)
         }
     }
 
+    /// Fetch (or re-fetch) content from the backend. Used for the async GitHub
+    /// initial load.
+    func reload() async {
+        isLoading = true
+        do {
+            let text = try await FileService.read(url)
+            self.text = text
+            self.savedText = text
+            self.loadError = nil
+        } catch {
+            self.loadError = error.localizedDescription
+        }
+        isLoading = false
+    }
+
     /// Persist current text; on success, `savedText` catches up so `isDirty`
     /// clears.
-    func save() throws {
-        try FileService.write(url, text)
+    func save() async throws {
+        try await FileService.write(url, text)
         savedText = text
     }
 }

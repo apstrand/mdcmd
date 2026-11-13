@@ -40,6 +40,15 @@ final class AppState: ObservableObject {
     /// jumping in via Quick Note / open-with). `DocumentView` consumes it.
     @Published var focusAtEndPath: String?
 
+    /// Whether a GitHub account is currently connected. Mirrors
+    /// `GitHubAuth.isAuthenticated` as a published flag so the Home screen
+    /// reacts to connect/disconnect.
+    @Published var isGitHubConnected: Bool = GitHubAuth.shared.isAuthenticated
+
+    /// Whether this build is configured to offer GitHub at all (client id +
+    /// proxy present). Hidden entirely when false, like the web's `isConfigured`.
+    var isGitHubConfigured: Bool { GitHubAuth.shared.isConfigured }
+
     /// Live edit sessions, keyed by path, so dirty state survives switching
     /// between open documents.
     private var sessions: [String: DocumentSession] = [:]
@@ -121,7 +130,7 @@ final class AppState: ObservableObject {
 
     func saveAll() {
         for session in sessions.values where session.isDirty {
-            try? session.save()
+            Task { try? await session.save() }
         }
     }
 
@@ -165,6 +174,22 @@ final class AppState: ObservableObject {
         } else {
             navPath = [route]
         }
+    }
+
+    // MARK: GitHub
+
+    /// Run the GitHub OAuth flow; on success the "GitHub" location appears.
+    func connectGitHub() async throws {
+        try await GitHubAuth.shared.login()
+        isGitHubConnected = GitHubAuth.shared.isAuthenticated
+    }
+
+    /// Sign out of GitHub and drop any pinned GitHub shortcuts (their bookmarks
+    /// are network-backed, not local, so they can't survive a disconnect).
+    func disconnectGitHub() {
+        GitHubAuth.shared.logout()
+        isGitHubConnected = false
+        shortcuts.removeAll { $0.isGitHub }
     }
 
     // MARK: First-run welcome

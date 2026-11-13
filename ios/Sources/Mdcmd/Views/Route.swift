@@ -13,7 +13,7 @@ enum Route: Hashable {
         switch entry.kind {
         case .folder: self = .folder(entry.url)
         case .image, .video: self = .media(entry)
-        case .text: self = .document(entry.url.path)
+        case .text: self = .document(entry.url.storageID)
         }
     }
 }

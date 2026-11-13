@@ -6,7 +6,7 @@ struct FileEntry: Identifiable, Hashable {
     let url: URL
     let isDirectory: Bool
 
-    var id: String { url.path }
+    var id: String { url.storageID }
     var name: String { url.lastPathComponent }
 
     /// Classify by extension for iconography and routing (edit vs. media view).

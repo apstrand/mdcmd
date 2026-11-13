@@ -24,6 +24,10 @@ struct DocumentView: View {
         Group {
             if let err = session.loadError {
                 unreadable(err)
+            } else if session.isLoading {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color(.systemBackground))
             } else if mode == .edit {
                 MarkdownTextEditor(text: $session.text, fontSize: fontSize, controller: editor)
                     .background(Color(.systemBackground))
@@ -106,9 +110,12 @@ struct DocumentView: View {
                 Button { setFont(fontSize + 1) } label: { Label("Larger Text", systemImage: "textformat.size.larger") }
                 Button { setFont(fontSize - 1) } label: { Label("Smaller Text", systemImage: "textformat.size.smaller") }
 
-                Divider()
-
-                ShareLink(item: session.url) { Label("Share", systemImage: "square.and.arrow.up") }
+                // A GitHub document has no on-disk file URL to hand the share
+                // sheet, so Share is offered for local files only.
+                if !session.url.isGitHub {
+                    Divider()
+                    ShareLink(item: session.url) { Label("Share", systemImage: "square.and.arrow.up") }
+                }
             } label: {
                 Image(systemName: "ellipsis.circle")
             }
@@ -143,16 +150,18 @@ struct DocumentView: View {
     // MARK: Actions
 
     private func save() {
-        do {
-            try session.save()
-        } catch {
-            saveError = error.localizedDescription
+        Task {
+            do {
+                try await session.save()
+            } catch {
+                saveError = error.localizedDescription
+            }
         }
     }
 
     private func autosave() {
         guard session.isDirty, session.loadError == nil else { return }
-        try? session.save()
+        Task { try? await session.save() }
     }
 
     private func setFont(_ size: CGFloat) {

@@ -32,8 +32,14 @@ enum FileService {
 
     /// Directory contents, folders first then files, each group sorted by name
     /// case-insensitively. Hidden dotfiles are omitted, matching a typical
-    /// Files-app presentation.
-    static func list(_ directory: URL) throws -> [FileEntry] {
+    /// Files-app presentation. GitHub URLs are served over the network; local
+    /// file URLs go straight through `FileManager`.
+    static func list(_ directory: URL) async throws -> [FileEntry] {
+        if directory.isGitHub { return try await GitHubService.shared.list(directory) }
+        return try listLocal(directory)
+    }
+
+    private static func listLocal(_ directory: URL) throws -> [FileEntry] {
         let urls = try FileManager.default.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: [.isDirectoryKey],
@@ -52,7 +58,14 @@ enum FileService {
 
     // MARK: Reading / writing
 
-    static func read(_ url: URL) throws -> String {
+    static func read(_ url: URL) async throws -> String {
+        if url.isGitHub { return try await GitHubService.shared.read(url) }
+        return try readLocal(url)
+    }
+
+    /// Synchronous local read, used for the no-flash initial load of on-device
+    /// documents (GitHub documents load asynchronously via `read`).
+    static func readLocal(_ url: URL) throws -> String {
         var coordinatorError: NSError?
         var readError: Error?
         var result: String?
@@ -77,7 +90,12 @@ enum FileService {
         return result ?? ""
     }
 
-    static func write(_ url: URL, _ content: String) throws {
+    static func write(_ url: URL, _ content: String) async throws {
+        if url.isGitHub { try await GitHubService.shared.write(url, content); return }
+        try writeLocal(url, content)
+    }
+
+    private static func writeLocal(_ url: URL, _ content: String) throws {
         var coordinatorError: NSError?
         var writeError: Error?
 
@@ -99,19 +117,27 @@ enum FileService {
 
     /// Create an empty file, failing if it already exists. Returns the URL.
     @discardableResult
-    static func createFile(in directory: URL, named name: String) throws -> URL {
+    static func createFile(in directory: URL, named name: String) async throws -> URL {
         let url = directory.appendingPathComponent(name)
+        if directory.isGitHub {
+            try await GitHubService.shared.createFile(url)
+            return url
+        }
         if FileManager.default.fileExists(atPath: url.path) {
             throw FileError.alreadyExists(name)
         }
-        try write(url, "")
+        try writeLocal(url, "")
         return url
     }
 
     /// Create an empty folder, failing if it already exists. Returns the URL.
     @discardableResult
-    static func createFolder(in directory: URL, named name: String) throws -> URL {
+    static func createFolder(in directory: URL, named name: String) async throws -> URL {
         let url = directory.appendingPathComponent(name, isDirectory: true)
+        if directory.isGitHub {
+            try await GitHubService.shared.createFolder(url)
+            return url
+        }
         if FileManager.default.fileExists(atPath: url.path) {
             throw FileError.alreadyExists(name)
         }
@@ -123,8 +149,16 @@ enum FileService {
     // MARK: Search
 
     /// Recursively find entries under `root` whose name contains `query`
-    /// (case-insensitive). Capped to keep large trees responsive.
-    static func search(root: URL, query: String, limit: Int = 200) -> [FileEntry] {
+    /// (case-insensitive). Capped to keep large trees responsive. GitHub uses the
+    /// code-search API (scoped to the enclosing repo).
+    static func search(root: URL, query: String, limit: Int = 200) async -> [FileEntry] {
+        if root.isGitHub {
+            return (try? await GitHubService.shared.search(root, query: query)) ?? []
+        }
+        return searchLocal(root: root, query: query, limit: limit)
+    }
+
+    private static func searchLocal(root: URL, query: String, limit: Int) -> [FileEntry] {
         let needle = query.lowercased()
         guard !needle.isEmpty else { return [] }
 

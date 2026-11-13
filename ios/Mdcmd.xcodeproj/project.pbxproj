@@ -29,6 +29,10 @@
 		B20000000000000000000028 /* MediaView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000027 /* MediaView.swift */; };
 		B2000000000000000000002A /* Route.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000029 /* Route.swift */; };
 		B2000000000000000000002C /* TourInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000002B /* TourInfo.swift */; };
+		B2000000000000000000002E /* ResourceURL.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000002D /* ResourceURL.swift */; };
+		B20000000000000000000030 /* GitHubService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000002F /* GitHubService.swift */; };
+		B20000000000000000000032 /* GitHubAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000031 /* GitHubAuth.swift */; };
+		B20000000000000000000034 /* Keychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000033 /* Keychain.swift */; };
 		AA00000000000000000014 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA00000000000000000011 /* Assets.xcassets */; };
 		AA00000000000000000015 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = AA00000000000000000012 /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
@@ -56,6 +60,10 @@
 		B10000000000000000000027 /* MediaView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MediaView.swift; path = Sources/Mdcmd/Views/MediaView.swift; sourceTree = SOURCE_ROOT; };
 		B10000000000000000000029 /* Route.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Route.swift; path = Sources/Mdcmd/Views/Route.swift; sourceTree = SOURCE_ROOT; };
 		B1000000000000000000002B /* TourInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TourInfo.swift; path = Sources/Mdcmd/Views/TourInfo.swift; sourceTree = SOURCE_ROOT; };
+		B1000000000000000000002D /* ResourceURL.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ResourceURL.swift; path = Sources/Mdcmd/Storage/ResourceURL.swift; sourceTree = SOURCE_ROOT; };
+		B1000000000000000000002F /* GitHubService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GitHubService.swift; path = Sources/Mdcmd/Services/GitHubService.swift; sourceTree = SOURCE_ROOT; };
+		B10000000000000000000031 /* GitHubAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = GitHubAuth.swift; path = Sources/Mdcmd/State/GitHubAuth.swift; sourceTree = SOURCE_ROOT; };
+		B10000000000000000000033 /* Keychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Keychain.swift; path = Sources/Mdcmd/Services/Keychain.swift; sourceTree = SOURCE_ROOT; };
 		AA00000000000000000011 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Mdcmd/Assets.xcassets; sourceTree = SOURCE_ROOT; };
 		AA00000000000000000012 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = Mdcmd/PrivacyInfo.xcprivacy; sourceTree = SOURCE_ROOT; };
 		AA00000000000000000013 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Mdcmd/Info.plist; sourceTree = SOURCE_ROOT; };
@@ -107,6 +115,10 @@
 				B10000000000000000000027 /* MediaView.swift */,
 				B10000000000000000000029 /* Route.swift */,
 				B1000000000000000000002B /* TourInfo.swift */,
+				B1000000000000000000002D /* ResourceURL.swift */,
+				B1000000000000000000002F /* GitHubService.swift */,
+				B10000000000000000000031 /* GitHubAuth.swift */,
+				B10000000000000000000033 /* Keychain.swift */,
 			);
 			name = Sources;
 			sourceTree = "<group>";
@@ -221,6 +233,10 @@
 				B20000000000000000000028 /* MediaView.swift in Sources */,
 				B2000000000000000000002A /* Route.swift in Sources */,
 				B2000000000000000000002C /* TourInfo.swift in Sources */,
+				B2000000000000000000002E /* ResourceURL.swift in Sources */,
+				B20000000000000000000030 /* GitHubService.swift in Sources */,
+				B20000000000000000000032 /* GitHubAuth.swift in Sources */,
+				B20000000000000000000034 /* Keychain.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
