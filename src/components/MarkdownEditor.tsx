@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useLayoutEffect, useState, useRef } from "react";
 import { useEditor, EditorContent, Extension, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { Markdown } from "tiptap-markdown";
@@ -33,8 +33,16 @@ import {
   ZoomOut,
   Pin,
   BookOpen,
+  Copy,
+  FolderOpen,
+  FolderSearch,
+  Diff,
+  Wand2,
 } from "lucide-react";
 import { rtlTruncate } from "../utils/paths";
+import { showContextMenu } from "./ContextMenu";
+import { canRevealInOS, revealInOS, revealLabel } from "../utils/osIntegration";
+import { textEditingMenuItems } from "../utils/textActions";
 
 const ZOOM_MIN = 0.6;
 const ZOOM_MAX = 2.5;
@@ -184,6 +192,23 @@ const SearchHighlightExtension = Extension.create({
 // object"; when that happens during a React render it unmounts the whole tree
 // and leaves a blank white window. Return null when the storage isn't ready so
 // callers can fall back to the plain-text content instead of crashing.
+/**
+ * The bullet character the file itself uses for unordered lists, so a document
+ * the user edits comes back out with its own convention rather than being
+ * rewritten to the serializer's default. Falls back to "-" (the default) when
+ * the file has no list to learn from.
+ */
+function detectBulletMarker(markdown: string): "-" | "*" | "+" {
+  const counts = { "-": 0, "*": 0, "+": 0 };
+  for (const line of markdown.split("\n")) {
+    const match = line.match(/^\s{0,3}([-*+])\s/);
+    if (match) counts[match[1] as "-" | "*" | "+"] += 1;
+  }
+  const [marker, count] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0] as
+    ["-" | "*" | "+", number];
+  return count > 0 ? marker : "-";
+}
+
 function getEditorMarkdown(editor: Editor | null): string | null {
   const markdown = (editor?.storage as { markdown?: { getMarkdown?: () => string } } | undefined)?.markdown;
   return typeof markdown?.getMarkdown === "function" ? markdown.getMarkdown() : null;
@@ -206,6 +231,10 @@ interface MarkdownEditorProps {
   focusAtEndFor?: string | null;
   /** Called right after consuming a matching `focusAtEndFor`. */
   onFocusAtEndHandled?: () => void;
+  /** Point the file browser at the folder holding this file. */
+  onRevealInFolderList?: (path: string) => void;
+  /** Open the "changes since last save" view for this file. */
+  onShowChanges?: () => void;
 }
 
 export default function MarkdownEditor({
@@ -220,6 +249,8 @@ export default function MarkdownEditor({
   focusAtEndFor,
   onFocusAtEndHandled,
   isDirty,
+  onRevealInFolderList,
+  onShowChanges,
 }: MarkdownEditorProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [editMode, setEditMode] = useState<"rich" | "plain">("rich");
@@ -322,10 +353,37 @@ export default function MarkdownEditor({
     findStateRef.current = findState;
   }, [findState]);
 
+  // Round-tripping markdown through the rich editor is lossy in cosmetic ways
+  // (list markers, escaping, blank lines), so the serialized text of a file
+  // nobody has touched rarely matches the bytes on disk. Comparing against this
+  // baseline — the serialization of the document as it was *loaded* — is what
+  // tells a real edit apart from that reformatting, so merely opening a file
+  // neither marks it dirty nor rewrites it on save.
+  const baselineMarkdownRef = useRef<string | null>(null);
+  // Set by the explicit "Reformat document" action: from then on the file
+  // counts as changed even if the user hasn't typed anything.
+  const [reformatRequested, setReformatRequested] = useState(false);
+  const reformatRequestedRef = useRef(false);
+  reformatRequestedRef.current = reformatRequested;
+
+  /** The content to hand upwards for the editor's current document. */
+  const contentFor = (markdown: string) => {
+    if (!reformatRequestedRef.current && markdown === baselineMarkdownRef.current) {
+      return initialContent;
+    }
+    // The serializer drops the file's final newline; keeping it spares every
+    // edited file a "\ No newline at end of file" line in its next diff.
+    return initialContent.endsWith("\n") && !markdown.endsWith("\n")
+      ? `${markdown}\n`
+      : markdown;
+  };
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({}),
-      Markdown,
+      Markdown.configure({
+        bulletListMarker: detectBulletMarker(initialContent),
+      }),
       TaskList,
       TaskItem.configure({
         nested: true,
@@ -391,10 +449,25 @@ export default function MarkdownEditor({
         const md = getEditorMarkdown(editor);
         if (md === null) return;
         setPlainContent(md);
-        onChange?.(filePath, md);
+        onChange?.(filePath, contentFor(md));
       }
     }
   });
+
+  // Take the baseline as soon as the editor exists — in a layout effect, so it
+  // is in place before anything the user can do, and before the first paint.
+  // Creating the editor can itself change the document (autolinking, list
+  // normalisation), which fires `onUpdate` while the baseline is still unknown
+  // and briefly reports the file as changed; re-reporting here settles that
+  // back to "unchanged" within the same commit.
+  useLayoutEffect(() => {
+    if (!editor || !isMarkdown || baselineMarkdownRef.current !== null) return;
+    const md = getEditorMarkdown(editor);
+    if (md === null) return;
+    baselineMarkdownRef.current = md;
+    onChange?.(filePath, contentFor(md));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor]);
 
   // Restore the saved scroll position for the rich editor once it is ready.
   // No saved value means "never opened before" -> stay at the top (0).
@@ -639,7 +712,11 @@ export default function MarkdownEditor({
     let contentToSave = "";
     if (isMarkdown) {
       if (editMode === "rich" && editor) {
-        contentToSave = getEditorMarkdown(editor) ?? plainContent;
+        const md = getEditorMarkdown(editor);
+        // `contentFor` keeps the file's own text when the document only
+        // differs by the editor's round-trip formatting, so saving a file
+        // nobody edited leaves it byte-for-byte as it was.
+        contentToSave = md === null ? plainContent : contentFor(md);
       } else {
         contentToSave = plainContent;
       }
@@ -669,10 +746,79 @@ export default function MarkdownEditor({
     if (mode === "plain") {
       const md = getEditorMarkdown(editor);
       if (md !== null) {
-        setPlainContent(md);
+        setPlainContent(contentFor(md));
       }
     }
     setEditMode(mode);
+  };
+
+  const copyText = (text: string) => {
+    navigator.clipboard.writeText(text).catch((err) =>
+      console.error("Clipboard copy failed:", err),
+    );
+  };
+
+  /** The file-level actions, shared by the header and the document body. */
+  const fileMenuItems = () => [
+    {
+      label: "Copy full path",
+      icon: <Copy className="w-3.5 h-3.5" />,
+      onSelect: () => copyText(filePath),
+    },
+    {
+      label: "Copy file name",
+      icon: <FileEdit className="w-3.5 h-3.5" />,
+      onSelect: () => copyText(getFileName(filePath)),
+    },
+    onRevealInFolderList && {
+      label: "Show in folder list",
+      icon: <FolderSearch className="w-3.5 h-3.5" />,
+      separatorBefore: true,
+      onSelect: () => onRevealInFolderList(filePath),
+    },
+    canRevealInOS && {
+      label: revealLabel,
+      icon: <FolderOpen className="w-3.5 h-3.5" />,
+      onSelect: () => {
+        revealInOS(filePath).catch((err) =>
+          console.error("Failed to reveal path:", err),
+        );
+      },
+    },
+    onShowChanges && {
+      label: "Show changes",
+      icon: <Diff className="w-3.5 h-3.5" />,
+      disabled: !isDirty,
+      separatorBefore: true,
+      onSelect: onShowChanges,
+    },
+    onTogglePin && {
+      label: isPinned ? "Remove from shortcuts" : "Pin to shortcuts",
+      icon: <Pin className="w-3.5 h-3.5" />,
+      onSelect: onTogglePin,
+    },
+    isMarkdown && {
+      label: "Reformat document",
+      icon: <Wand2 className="w-3.5 h-3.5" />,
+      separatorBefore: true,
+      onSelect: reformatDocument,
+    },
+  ];
+
+  /**
+   * Rewrite the document in the editor's own markdown style — the opt-in
+   * counterpart to leaving untouched files alone. Marks the file dirty so the
+   * reformatting is saved like any other edit (and can be undone by closing
+   * without saving).
+   */
+  const reformatDocument = () => {
+    const md = editMode === "rich" ? getEditorMarkdown(editor) : plainContent;
+    if (md === null) return;
+    reformatRequestedRef.current = true;
+    setReformatRequested(true);
+    const reformatted = contentFor(md);
+    setPlainContent(reformatted);
+    onChange?.(filePath, reformatted);
   };
 
   // Intercept Shift+Tab to focus the sidebar folder view — but only when it
@@ -804,11 +950,25 @@ export default function MarkdownEditor({
     <div className="main-panel" onKeyDownCapture={handleKeyDownCapture}>
       <div className="editor-header">
         <div className="file-info">
-          <div className="file-title-container">
+          <div
+            className="file-title-container"
+            onContextMenu={(e) => showContextMenu(e, fileMenuItems())}
+          >
             <FileEdit className="w-5 h-5 text-accent" style={{ flexShrink: 0 }} />
             <div className="file-title-lines">
               <div className="file-name-text">{getFileName(filePath)}</div>
-              <div className="file-path-text" title={filePath}>
+              <div
+                className="file-path-text"
+                title={filePath}
+                // What's shown is a shortened, right-to-left-truncated label,
+                // so selecting it would otherwise copy mangled fragments of
+                // the path. Anyone copying a path wants the real, absolute
+                // one, so hand that over instead.
+                onCopy={(e) => {
+                  e.clipboardData.setData("text/plain", filePath);
+                  e.preventDefault();
+                }}
+              >
                 {rtlTruncate(pathLabel || filePath)}
               </div>
             </div>
@@ -1146,7 +1306,19 @@ export default function MarkdownEditor({
       >
         <div className="editor-wrapper" data-content-theme={contentTheme}>
           {isMarkdown && editMode === "rich" ? (
-            <EditorContent editor={editor} />
+            <div
+              style={{ display: "contents" }}
+              onContextMenu={(e) =>
+                showContextMenu(e, [
+                  ...textEditingMenuItems(e.target instanceof Element ? e.target : null),
+                  ...fileMenuItems().map((item, index) =>
+                    item && index === 0 ? { ...item, separatorBefore: true } : item,
+                  ),
+                ])
+              }
+            >
+              <EditorContent editor={editor} />
+            </div>
           ) : (
             <textarea
               className="plain-text-editor"

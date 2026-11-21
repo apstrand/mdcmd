@@ -10,6 +10,8 @@ import {
   type WebProviderId,
 } from "../storage/web";
 import { rtlTruncate } from "../utils/paths";
+import { showContextMenu } from "./ContextMenu";
+import { canRevealInOS, revealInOS, revealLabel } from "../utils/osIntegration";
 import {
   Folder,
   FileText,
@@ -29,6 +31,9 @@ import {
   MoreVertical,
   Plus,
   Zap,
+  Copy,
+  FolderOpen,
+  ArrowUp,
 } from "lucide-react";
 
 interface FileEntry {
@@ -52,6 +57,63 @@ interface VersionInfo {
   version: string;
   commit: string;
   commitDate: string;
+}
+
+/**
+ * The path bar: every ancestor is a button that jumps straight to that folder.
+ * Overflow scrolls horizontally with the current folder pinned to the visible
+ * (right) end, and copying from it yields the absolute path rather than the
+ * shortened label.
+ */
+function Breadcrumb({
+  path,
+  segments,
+  onNavigate,
+  leading,
+  placeholder,
+}: {
+  path: string;
+  segments: { name: string; path: string }[];
+  onNavigate: (dir: string) => void;
+  leading?: string;
+  placeholder?: string;
+}) {
+  return (
+    <div
+      className="path-bar path-breadcrumb"
+      title={path}
+      onCopy={(e) => {
+        e.clipboardData.setData("text/plain", path);
+        e.preventDefault();
+      }}
+    >
+      {leading && <span style={{ flexShrink: 0 }}>{leading}</span>}
+      {segments.length === 0 ? (
+        <span className="path-crumb-current">{placeholder ?? ""}</span>
+      ) : (
+        segments.map((segment, index) =>
+          index === segments.length - 1 ? (
+            <span key={segment.path} className="path-crumb-current">
+              {segment.name}
+            </span>
+          ) : (
+            <span key={segment.path} style={{ display: "contents" }}>
+              <button
+                className="path-crumb"
+                tabIndex={-1}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => onNavigate(segment.path)}
+                title={`Go to ${segment.path}`}
+              >
+                {segment.name}
+              </button>
+              <span className="path-crumb-sep">›</span>
+            </span>
+          ),
+        )
+      )}
+    </div>
+  );
 }
 
 interface FileBrowserProps {
@@ -105,27 +167,6 @@ export default function FileBrowser({
   // programs and refresh the listing without the user asking.
   const dirSignaturesRef = useRef<Record<string, string>>({});
   const createInputRef = useRef<HTMLInputElement>(null);
-
-  // Right-click context menu (folder entries + folder-pane background), with
-  // "New File" / "New Folder" actions targeting whichever folder it was
-  // opened on.
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; dir: string } | null>(null);
-
-  useEffect(() => {
-    if (!contextMenu) return;
-    const close = () => setContextMenu(null);
-    const closeOnEscape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setContextMenu(null);
-    };
-    window.addEventListener("click", close);
-    window.addEventListener("contextmenu", close);
-    window.addEventListener("keydown", closeOnEscape);
-    return () => {
-      window.removeEventListener("click", close);
-      window.removeEventListener("contextmenu", close);
-      window.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [contextMenu]);
 
   const sidebarRef = useRef<HTMLDivElement>(null);
 
@@ -240,6 +281,12 @@ export default function FileBrowser({
         setSearchScope("folder");
         searchInputRef.current?.focus();
         searchInputRef.current?.select();
+      } else if (e.key === "ArrowUp" && (isCmd || e.altKey)) {
+        // Cmd+Up is the Finder gesture for "enclosing folder"; Alt+Up is the
+        // Explorer/Files one. Backspace does the same when the sidebar has
+        // focus, and the breadcrumb does it with the mouse.
+        e.preventDefault();
+        goUpActiveViewRef.current();
       }
     };
     window.addEventListener("keydown", handleGlobalShortcuts);
@@ -656,6 +703,18 @@ export default function FileBrowser({
 
   const canGoUpTree = () => canGoUpPath(treeRootPath);
 
+  /** Go up one level in whichever view is on screen (button, Cmd/Alt+Up). */
+  const goUpActiveView = () => {
+    if (loading) return;
+    if (viewMode === "tree") {
+      if (canGoUpTree()) handleGoUpTree();
+    } else if (canGoUp()) {
+      handleGoUp();
+    }
+  };
+  const goUpActiveViewRef = useRef(goUpActiveView);
+  goUpActiveViewRef.current = goUpActiveView;
+
   // Extract folder name from absolute path
   const getFolderName = (path: string) => {
     const isWindows = path.includes("\\");
@@ -671,21 +730,108 @@ export default function FileBrowser({
   // from Files / iCloud Drive), like "Notes › drafts › todo.md", instead of the
   // raw device path (/private/var/mobile/…). Falls back to the absolute path
   // when it isn't under any pinned root.
-  const displayPath = (fullPath: string) => {
-    if (!fullPath) return fullPath;
-    const sep = fullPath.includes("\\") ? "\\" : "/";
-    const root = pinnedShortcuts
-      .filter(
-        (p) =>
-          p.isDir &&
-          (fullPath === p.path ||
-            fullPath.startsWith(p.path.replace(/[/\\]+$/, "") + sep)),
-      )
-      .sort((a, b) => b.path.length - a.path.length)[0];
-    if (!root) return fullPath;
-    const name = getFolderName(root.path);
-    const sub = fullPath.substring(root.path.length).replace(/^[/\\]+/, "");
-    return sub ? `${name} › ${sub}` : name;
+
+  /**
+   * The ancestors of `path`, outermost first, as clickable breadcrumb
+   * segments — the second (and most discoverable) way to move up the
+   * hierarchy besides the "Go Up" button and Cmd/Ctrl+Up.
+   *
+   * On a document-picker backend (iOS) the crumbs stop at the picked root,
+   * since browsing above it isn't permitted; elsewhere they go all the way
+   * to the filesystem root.
+   */
+  const pathSegments = (fullPath: string): { name: string; path: string }[] => {
+    if (!fullPath) return [];
+    const isWindows = fullPath.includes("\\");
+    const sep = isWindows ? "\\" : "/";
+    const root = navRoot(fullPath);
+
+    const parts = fullPath.split(sep).filter(Boolean);
+    const segments: { name: string; path: string }[] = [];
+    let walked = isWindows ? "" : "";
+    if (!isWindows && !root) {
+      segments.push({ name: "/", path: "/" });
+    }
+    for (const part of parts) {
+      walked = walked ? `${walked}${sep}${part}` : isWindows ? part : `${sep}${part}`;
+      if (root && walked.length < root.length) continue;
+      segments.push({ name: part, path: walked });
+    }
+    return segments;
+  };
+
+  const copyText = (text: string) => {
+    navigator.clipboard.writeText(text).catch((err) =>
+      console.error("Clipboard copy failed:", err),
+    );
+  };
+
+  const showInOS = (path: string) => {
+    revealInOS(path).catch((err) => console.error("Failed to reveal path:", err));
+  };
+
+  /**
+   * Right-click actions for the folder pane. `entry` is the item clicked on,
+   * or null for the pane's background (where the actions apply to the folder
+   * being browsed).
+   */
+  const folderPaneMenuItems = (entry: { path: string; isDir: boolean } | null) => {
+    const browsedDir = viewMode === "tree" ? treeRootPath : currentPath;
+    const targetDir = entry ? (entry.isDir ? entry.path : browsedDir) : browsedDir;
+    const pinned = entry ? pinnedShortcuts.some((p) => p.path === entry.path) : false;
+
+    return [
+      entry &&
+        (entry.isDir
+          ? {
+              label: "Open folder",
+              icon: <Folder className="w-3.5 h-3.5" />,
+              onSelect: () => {
+                if (viewMode === "tree") setTreeRootPath(entry.path);
+                else setCurrentPath(entry.path);
+              },
+            }
+          : {
+              label: "Open file",
+              icon: <FileText className="w-3.5 h-3.5" />,
+              onSelect: () => onSelectFile(entry.path),
+            }),
+      !entry && {
+        label: "Go to parent folder",
+        icon: <ArrowUp className="w-3.5 h-3.5" />,
+        disabled: viewMode === "tree" ? !canGoUpTree() : !canGoUp(),
+        onSelect: goUpActiveView,
+      },
+      {
+        label: "New file",
+        icon: <FilePlus className="w-3.5 h-3.5" />,
+        separatorBefore: true,
+        onSelect: () => startCreate(false, targetDir),
+      },
+      {
+        label: "New folder",
+        icon: <FolderPlus className="w-3.5 h-3.5" />,
+        onSelect: () => startCreate(true, targetDir),
+      },
+      {
+        label: "Copy full path",
+        icon: <Copy className="w-3.5 h-3.5" />,
+        separatorBefore: true,
+        onSelect: () => copyText(entry ? entry.path : browsedDir),
+      },
+      canRevealInOS && {
+        label: revealLabel,
+        icon: <FolderOpen className="w-3.5 h-3.5" />,
+        onSelect: () => showInOS(entry ? entry.path : browsedDir),
+      },
+      entry && {
+        label: pinned ? "Remove from shortcuts" : "Pin to shortcuts",
+        icon: <Pin className="w-3.5 h-3.5" />,
+        separatorBefore: true,
+        onSelect: () =>
+          pinned ? handleUnpin(entry.path) : handlePin(entry.path, entry.isDir),
+      },
+    ];
   };
 
   // Pin a folder or file
@@ -775,7 +921,6 @@ export default function FileBrowser({
     setError(null);
     setCreateTarget({ isDir, dir: targetDir });
     setCreateName("");
-    setContextMenu(null);
     // Focus the input on the next tick once it has rendered
     setTimeout(() => createInputRef.current?.focus(), 0);
   };
@@ -1249,11 +1394,7 @@ export default function FileBrowser({
         )}
         <div
           className="sidebar-scroll-content"
-          onContextMenu={(e) => {
-            e.preventDefault();
-            const dir = viewMode === "tree" ? treeRootPath : currentPath;
-            if (dir) setContextMenu({ x: e.clientX, y: e.clientY, dir });
-          }}
+          onContextMenu={(e) => showContextMenu(e, folderPaneMenuItems(null))}
         >
           {viewMode === "list" && (
             <div style={{ display: "flex", gap: "6px", marginBottom: "8px" }}>
@@ -1270,11 +1411,15 @@ export default function FileBrowser({
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
-              <div className="path-bar" title={currentPath}>
-                <span className="path-ellipsis-left">
-                  {rtlTruncate(displayPath(currentPath)) || "Loading path..."}
-                </span>
-              </div>
+              <Breadcrumb
+                path={currentPath}
+                segments={pathSegments(currentPath)}
+                onNavigate={(dir) => {
+                  setCurrentPath(dir);
+                  sidebarRef.current?.focus();
+                }}
+                placeholder="Loading path..."
+              />
             </div>
           )}
 
@@ -1293,10 +1438,15 @@ export default function FileBrowser({
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
-              <div className="path-bar" title={treeRootPath} style={{ flexGrow: 1, fontSize: "11px", opacity: 0.8 }}>
-                <span style={{ flexShrink: 0 }}>🌳</span>
-                <span className="path-ellipsis-left">{rtlTruncate(displayPath(treeRootPath))}</span>
-              </div>
+              <Breadcrumb
+                path={treeRootPath}
+                segments={pathSegments(treeRootPath)}
+                onNavigate={(dir) => {
+                  setTreeRootPath(dir);
+                  sidebarRef.current?.focus();
+                }}
+                leading="🌳"
+              />
             </div>
           )}
 
@@ -1520,12 +1670,12 @@ export default function FileBrowser({
                           onSelectFile(entry.path);
                         }
                       }}
-                      onContextMenu={(e) => {
-                        if (!entry.is_dir) return;
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setContextMenu({ x: e.clientX, y: e.clientY, dir: entry.path });
-                      }}
+                      onContextMenu={(e) =>
+                        showContextMenu(
+                          e,
+                          folderPaneMenuItems({ path: entry.path, isDir: entry.is_dir }),
+                        )
+                      }
                       style={{
                         opacity: !entry.is_dir && !isSelectable ? 0.45 : 1,
                         cursor: !entry.is_dir && !isSelectable ? "default" : "pointer",
@@ -1609,12 +1759,12 @@ export default function FileBrowser({
                           onSelectFile(node.path);
                         }
                       }}
-                      onContextMenu={(e) => {
-                        if (!node.isDir) return;
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setContextMenu({ x: e.clientX, y: e.clientY, dir: node.path });
-                      }}
+                      onContextMenu={(e) =>
+                        showContextMenu(
+                          e,
+                          folderPaneMenuItems({ path: node.path, isDir: node.isDir }),
+                        )
+                      }
                       style={{
                         paddingLeft: `${node.depth * 12 + 8}px`,
                         cursor: "pointer",
@@ -1829,41 +1979,6 @@ export default function FileBrowser({
         </div>
       )}
 
-      {contextMenu && (
-        <div
-          style={{
-            position: "fixed",
-            left: contextMenu.x,
-            top: contextMenu.y,
-            zIndex: 1000,
-            backgroundColor: "var(--bg-secondary)",
-            border: "1px solid var(--border)",
-            borderRadius: "6px",
-            boxShadow: "0 4px 12px rgba(0, 0, 0, 0.25)",
-            padding: "4px",
-            minWidth: "160px",
-          }}
-          onClick={(e) => e.stopPropagation()}
-          onContextMenu={(e) => e.preventDefault()}
-        >
-          <button
-            className="context-menu-item"
-            style={{ display: "flex", alignItems: "center", gap: "8px", width: "100%", padding: "6px 10px", border: "none", background: "transparent", cursor: "pointer", color: "var(--text-primary)", fontSize: "13px", textAlign: "left", borderRadius: "4px" }}
-            onClick={() => startCreate(false, contextMenu.dir)}
-          >
-            <FilePlus className="w-3.5 h-3.5" />
-            New File
-          </button>
-          <button
-            className="context-menu-item"
-            style={{ display: "flex", alignItems: "center", gap: "8px", width: "100%", padding: "6px 10px", border: "none", background: "transparent", cursor: "pointer", color: "var(--text-primary)", fontSize: "13px", textAlign: "left", borderRadius: "4px" }}
-            onClick={() => startCreate(true, contextMenu.dir)}
-          >
-            <FolderPlus className="w-3.5 h-3.5" />
-            New Folder
-          </button>
-        </div>
-      )}
     </div>
   );
 }
