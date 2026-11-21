@@ -1041,6 +1041,46 @@ body {
   margin: 2em 0;
 }
 
+/* Tables. display:block lets a table wider than the column scroll sideways
+   instead of pushing the whole page wide. */
+.ProseMirror table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 0 0 1.2em;
+}
+
+.ProseMirror th,
+.ProseMirror td {
+  border: 1px solid var(--border);
+  padding: 6px 12px;
+  vertical-align: top;
+  min-width: 3em;
+  position: relative;
+}
+
+.ProseMirror th {
+  background: var(--bg-tertiary);
+  font-weight: 600;
+  text-align: left;
+}
+
+.ProseMirror th p,
+.ProseMirror td p {
+  margin: 0;
+}
+
+/* prosemirror-tables marks cells covered by a drag selection. */
+.ProseMirror .selectedCell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--accent);
+  opacity: 0.15;
+  pointer-events: none;
+}
 
 /* Tabs Bar Styles */
 .tabs-container {

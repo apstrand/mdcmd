@@ -7,6 +7,7 @@ import TaskItem from "@tiptap/extension-task-item";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 import Link from "@tiptap/extension-link";
+import { tableExtensions, tableMenuItems } from "../utils/markdownTable";
 import {
   Bold,
   Italic,
@@ -388,6 +389,7 @@ export default function MarkdownEditor({
       TaskItem.configure({
         nested: true,
       }),
+      ...tableExtensions,
       SearchHighlightExtension.configure({
         findStateRef: findStateRef,
       }),
@@ -1311,6 +1313,7 @@ export default function MarkdownEditor({
               onContextMenu={(e) =>
                 showContextMenu(e, [
                   ...textEditingMenuItems(e.target instanceof Element ? e.target : null),
+                  ...tableMenuItems(editor),
                   ...fileMenuItems().map((item, index) =>
                     item && index === 0 ? { ...item, separatorBefore: true } : item,
                   ),

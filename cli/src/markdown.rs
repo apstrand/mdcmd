@@ -57,7 +57,14 @@ pub fn parse_markdown(content: &str, palette: &crate::palette::Palette) -> Parse
         };
     }
 
-    for (source_idx, raw_line) in content.lines().enumerate() {
+    let source_lines: Vec<&str> = content.lines().collect();
+    // A multi-line construct (a table) consumes the source lines up to here.
+    let mut resume_at = 0;
+
+    for (source_idx, &raw_line) in source_lines.iter().enumerate() {
+        if source_idx < resume_at {
+            continue;
+        }
         let trimmed = raw_line.trim();
 
         // 1. Code Block Toggle
@@ -73,6 +80,20 @@ pub fn parse_markdown(content: &str, palette: &crate::palette::Palette) -> Parse
             push_line!(source_idx, Line::from(vec![
                 Span::styled(raw_line.to_string(), Style::default().fg(code_color))
             ]));
+            continue;
+        }
+
+        // 1b. GFM pipe tables
+        if let Some(table) = parse_table(&source_lines, source_idx) {
+            let rendered = render_table(&table, palette);
+            for (line, source, line_links) in rendered {
+                let line_idx = lines.len();
+                for (span, text, url) in line_links {
+                    links.push(LinkRef { line: line_idx, span, text, url });
+                }
+                push_line!(source, line);
+            }
+            resume_at = table.end;
             continue;
         }
 
@@ -174,6 +195,205 @@ pub fn parse_markdown(content: &str, palette: &crate::palette::Palette) -> Parse
     }
 
     ParsedMarkdown { text: Text::from(lines), images, links, line_map }
+}
+
+/// Column alignment from a GFM delimiter row (`:--`, `:-:`, `--:`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Align {
+    Default,
+    Left,
+    Center,
+    Right,
+}
+
+/// A GFM pipe table found in the source: a header row, a delimiter row, then
+/// body rows up to the first blank line or other block. Cell text is
+/// still raw inline markdown.
+#[derive(Debug)]
+struct TableBlock {
+    /// Source line index of the header row.
+    start: usize,
+    /// One past the source line index of the last body row.
+    end: usize,
+    aligns: Vec<Align>,
+    header: Vec<String>,
+    /// Padded or truncated to the header's column count, as GFM does.
+    rows: Vec<Vec<String>>,
+}
+
+/// Splits a table row into trimmed cells on unescaped `|` (GFM splits even
+/// inside code spans; `\|` is how a cell holds a literal pipe). The optional
+/// leading and trailing pipes don't start or end extra cells.
+fn split_table_row(line: &str) -> Vec<String> {
+    let mut cells = Vec::new();
+    let mut current = String::new();
+    let mut chars = line.trim().chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' if chars.peek() == Some(&'|') => {
+                current.push('|');
+                chars.next();
+            }
+            '|' => cells.push(std::mem::take(&mut current)),
+            _ => current.push(c),
+        }
+    }
+    cells.push(current);
+    let trimmed = line.trim();
+    if trimmed.starts_with('|') {
+        cells.remove(0);
+    }
+    if trimmed.len() > 1 && trimmed.ends_with('|') && !trimmed.ends_with("\\|") {
+        cells.pop();
+    }
+    cells.into_iter().map(|cell| cell.trim().to_string()).collect()
+}
+
+fn parse_delimiter_row(line: &str) -> Option<Vec<Align>> {
+    // A delimiter row needs a pipe; a bare `---` is a rule or a setext heading.
+    if !line.contains('|') {
+        return None;
+    }
+    split_table_row(line)
+        .iter()
+        .map(|cell| {
+            let left = cell.starts_with(':');
+            let right = cell.ends_with(':');
+            let dashes = cell.trim_start_matches(':').trim_end_matches(':');
+            if dashes.is_empty() || !dashes.chars().all(|c| c == '-') {
+                return None;
+            }
+            Some(match (left, right) {
+                (true, true) => Align::Center,
+                (true, false) => Align::Left,
+                (false, true) => Align::Right,
+                (false, false) => Align::Default,
+            })
+        })
+        .collect()
+}
+
+/// Recognizes a table whose header row is `lines[start]`.
+fn parse_table(lines: &[&str], start: usize) -> Option<TableBlock> {
+    let header_line = lines[start];
+    if !header_line.contains('|') || header_line.starts_with("    ") || header_line.starts_with('\t') {
+        return None;
+    }
+    let delimiter_line = lines.get(start + 1)?;
+    let aligns = parse_delimiter_row(delimiter_line)?;
+    let header = split_table_row(header_line);
+    if header.len() != aligns.len() {
+        return None;
+    }
+
+    let mut rows = Vec::new();
+    let mut end = start + 2;
+    while let Some(line) = lines.get(end) {
+        // As in GFM, a line without a pipe is still a (one-cell) row; the
+        // table ends at a blank line or where another kind of block begins.
+        let trimmed = line.trim();
+        if trimmed.is_empty() || ["#", ">", "```"].iter().any(|p| trimmed.starts_with(p)) {
+            break;
+        }
+        let mut cells = split_table_row(line);
+        cells.resize(header.len(), String::new());
+        rows.push(cells);
+        end += 1;
+    }
+    Some(TableBlock { start, end, aligns, header, rows })
+}
+
+/// Links found in inline text, as `(span index, text, url)`.
+type InlineLinks = Vec<(usize, String, String)>;
+
+/// One rendered cell: its spans and the links among them.
+type RenderedCell = (Vec<Span<'static>>, InlineLinks);
+
+/// One rendered line: its spans, the source line it maps to, and its links.
+type TableLine = (Line<'static>, usize, InlineLinks);
+
+/// Draws the table with box-drawing borders, each column as wide as its
+/// widest cell. Cells keep their inline formatting (code, bold, links).
+fn render_table(table: &TableBlock, palette: &crate::palette::Palette) -> Vec<TableLine> {
+    let border = Style::default().fg(palette.border_inactive);
+    let render_cells = |cells: &[String], bold: bool| -> Vec<RenderedCell> {
+        cells
+            .iter()
+            .map(|cell| {
+                let mut cell_links = Vec::new();
+                let mut spans = if cell.is_empty() {
+                    Vec::new()
+                } else {
+                    parse_inline(cell, palette.text_primary, palette.code, palette.code_bg, palette.accent, &mut cell_links)
+                };
+                if bold {
+                    for span in &mut spans {
+                        span.style = span.style.add_modifier(Modifier::BOLD);
+                    }
+                }
+                (spans, cell_links)
+            })
+            .collect()
+    };
+
+    let header = render_cells(&table.header, true);
+    let rows: Vec<_> = table.rows.iter().map(|row| render_cells(row, false)).collect();
+    let cell_width = |spans: &[Span<'static>]| spans.iter().map(|s| s.width()).sum::<usize>();
+    let widths: Vec<usize> = (0..table.aligns.len())
+        .map(|column| {
+            std::iter::once(&header)
+                .chain(rows.iter())
+                .map(|row| cell_width(&row[column].0))
+                .max()
+                .unwrap_or(0)
+                .max(1)
+        })
+        .collect();
+
+    let rule = |left: &str, mid: &str, right: &str| -> Line<'static> {
+        let segments: Vec<String> = widths.iter().map(|w| "─".repeat(w + 2)).collect();
+        Line::from(Span::styled(format!("{left}{}{right}", segments.join(mid)), border))
+    };
+
+    let row_line = |cells: &[RenderedCell]| {
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        let mut line_links = Vec::new();
+        for (column, (cell_spans, cell_links)) in cells.iter().enumerate() {
+            spans.push(Span::styled(if column == 0 { "│ " } else { " │ " }, border));
+            let space = widths[column] - cell_width(cell_spans);
+            let (before, after) = match table.aligns[column] {
+                Align::Right => (space, 0),
+                Align::Center => (space / 2, space - space / 2),
+                _ => (0, space),
+            };
+            if before > 0 {
+                spans.push(Span::raw(" ".repeat(before)));
+            }
+            for (span, text, url) in cell_links {
+                line_links.push((spans.len() + span, text.clone(), url.clone()));
+            }
+            spans.extend(cell_spans.iter().cloned());
+            if after > 0 {
+                spans.push(Span::raw(" ".repeat(after)));
+            }
+        }
+        spans.push(Span::styled(" │", border));
+        (Line::from(spans), line_links)
+    };
+
+    let delimiter_source = table.start + 1;
+    let last_source = table.end - 1;
+    let mut out: Vec<TableLine> = Vec::new();
+    out.push((rule("┌", "┬", "┐"), table.start, Vec::new()));
+    let (line, line_links) = row_line(&header);
+    out.push((line, table.start, line_links));
+    out.push((rule("├", "┼", "┤"), delimiter_source, Vec::new()));
+    for (index, row) in rows.iter().enumerate() {
+        let (line, line_links) = row_line(row);
+        out.push((line, table.start + 2 + index, line_links));
+    }
+    out.push((rule("└", "┴", "┘"), last_source, Vec::new()));
+    out
 }
 
 struct InlineImageSyntax {
@@ -457,5 +677,67 @@ mod tests {
         let palette = get_mock_palette();
         let parsed = parse_markdown(content, &palette);
         assert!(parsed.images.is_empty());
+    }
+
+    fn table_text(parsed: &ParsedMarkdown) -> Vec<String> {
+        parsed.text.lines.iter().map(|l| l.to_string()).collect()
+    }
+
+    #[test]
+    fn test_table_renders_with_borders_and_alignment() {
+        let content = "Intro\n| Name | Qty | Price |\n|:-----|:---:|------:|\n| Apple | 3 | 1.50 |\n| Banana | 12 | 0.25 |\n\nOutro";
+        let parsed = parse_markdown(content, &get_mock_palette());
+        assert_eq!(
+            table_text(&parsed),
+            vec![
+                "Intro",
+                "┌────────┬─────┬───────┐",
+                "│ Name   │ Qty │ Price │",
+                "├────────┼─────┼───────┤",
+                "│ Apple  │  3  │  1.50 │",
+                "│ Banana │ 12  │  0.25 │",
+                "└────────┴─────┴───────┘",
+                "",
+                "Outro",
+            ]
+        );
+        assert_eq!(parsed.line_map, vec![0, 1, 1, 2, 3, 4, 4, 5, 6]);
+        // Header cells are bold.
+        let name = parsed.text.lines[2].spans.iter().find(|s| s.content == "Name").unwrap();
+        assert!(name.style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn test_table_without_outer_pipes_and_ragged_rows() {
+        let content = "a | b\n--- | ---\n1\n| 1 | 2 | 3 |";
+        let parsed = parse_markdown(content, &get_mock_palette());
+        assert_eq!(
+            table_text(&parsed),
+            vec!["┌───┬───┐", "│ a │ b │", "├───┼───┤", "│ 1 │   │", "│ 1 │ 2 │", "└───┴───┘"]
+        );
+    }
+
+    #[test]
+    fn test_table_escaped_pipe_and_inline_formatting() {
+        let content = "| Op | Note |\n|---|---|\n| `a\\|b` | see [docs](d.md) |";
+        let parsed = parse_markdown(content, &get_mock_palette());
+        assert_eq!(table_text(&parsed)[3], "│  a|b  │ see docs │");
+        assert_eq!(parsed.links.len(), 1);
+        let link = &parsed.links[0];
+        assert_eq!(link.line, 3);
+        assert_eq!(parsed.text.lines[3].spans[link.span].content, "docs");
+        assert_eq!(link.url, "d.md");
+    }
+
+    #[test]
+    fn test_pipe_lines_that_are_not_tables() {
+        // No delimiter row; a bare `---` under a pipe line; inside a code block.
+        for content in ["a | b\nc | d", "a | b\n---", "```\n| a |\n|---|\n```", "| a | b |\n|---|"] {
+            let parsed = parse_markdown(content, &get_mock_palette());
+            assert!(
+                !table_text(&parsed).iter().any(|l| l.contains('┌')),
+                "rendered a table for {content:?}"
+            );
+        }
     }
 }
