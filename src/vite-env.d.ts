@@ -9,3 +9,10 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+// Ships without its own type declarations; it's a plain markdown-it plugin.
+declare module "markdown-it-task-lists" {
+  import type MarkdownIt from "markdown-it";
+  const plugin: MarkdownIt.PluginSimple;
+  export default plugin;
+}

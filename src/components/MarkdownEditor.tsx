@@ -39,9 +39,11 @@ import {
   FolderSearch,
   Diff,
   Wand2,
+  Printer,
 } from "lucide-react";
 import { rtlTruncate } from "../utils/paths";
 import { showContextMenu } from "./ContextMenu";
+import { printDocument } from "../utils/printDocument";
 import { canRevealInOS, revealInOS, revealLabel } from "../utils/osIntegration";
 import { textEditingMenuItems } from "../utils/textActions";
 
@@ -805,6 +807,12 @@ export default function MarkdownEditor({
       separatorBefore: true,
       onSelect: reformatDocument,
     },
+    {
+      label: "Print / Export as PDF…",
+      icon: <Printer className="w-3.5 h-3.5" />,
+      separatorBefore: !isMarkdown,
+      onSelect: handlePrint,
+    },
   ];
 
   /**
@@ -821,6 +829,18 @@ export default function MarkdownEditor({
     const reformatted = contentFor(md);
     setPlainContent(reformatted);
     onChange?.(filePath, reformatted);
+  };
+
+  /**
+   * Lay the document out as a clean page and open the OS print dialog, whose
+   * "Save as PDF" doubles as the export path. Reads the live content (the
+   * editor's serialized markdown in rich mode, the textarea otherwise) so
+   * unsaved edits are included, and carries the chosen reading theme through.
+   */
+  const handlePrint = () => {
+    const md = editMode === "rich" ? getEditorMarkdown(editor) : plainContent;
+    const content = md === null ? plainContent : md;
+    printDocument(content, getFileName(filePath), isMarkdown, contentTheme);
   };
 
   // Intercept Shift+Tab to focus the sidebar folder view — but only when it
@@ -848,6 +868,11 @@ export default function MarkdownEditor({
     handleFindPrevRef.current = handleFindPrev;
   });
 
+  const handlePrintRef = useRef(handlePrint);
+  useEffect(() => {
+    handlePrintRef.current = handlePrint;
+  });
+
   // Keyboard shortcut Ctrl+S / Cmd+S for saving, Cmd+F for find, Cmd+G for find next, Cmd+Shift+G for find prev,
   // Cmd+` to toggle between rich text and plain text editing.
   useEffect(() => {
@@ -861,6 +886,9 @@ export default function MarkdownEditor({
       } else if (isCmd && key === "s") {
         e.preventDefault();
         handleSaveRef.current();
+      } else if (isCmd && key === "p" && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        handlePrintRef.current();
       } else if (isCmd && key === "f") {
         e.preventDefault();
         setFindState(prev => {
@@ -1069,6 +1097,16 @@ export default function MarkdownEditor({
               <ZoomIn className="w-4 h-4" />
             </button>
           </div>
+
+          <button
+            className="file-action-btn"
+            onClick={handlePrint}
+            title="Print / Export as PDF"
+            aria-label="Print or export as PDF"
+            style={{ marginLeft: "8px", flexShrink: 0 }}
+          >
+            <Printer className="w-4 h-4" />
+          </button>
 
           <div className="save-status">
             {isEditable ? (

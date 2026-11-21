@@ -690,6 +690,17 @@ fn drain_quick_note_request(state: tauri::State<'_, QuickNoteRequests>) -> u32 {
     std::mem::take(&mut *count)
 }
 
+/// Open the native print panel for the current webview. The frontend first
+/// swaps in a print-only view (an `@media print` stylesheet that hides the app
+/// and shows only the formatted document), then calls this — because macOS
+/// WKWebView's JS `window.print()` is a silent no-op, and only this native
+/// path (wry's `printOperationWithPrintInfo:`) actually reaches the dialog.
+#[cfg(desktop)]
+#[tauri::command]
+fn print_webview(webview: tauri::WebviewWindow) -> Result<(), String> {
+    webview.print().map_err(|e| e.to_string())
+}
+
 // Build the desktop menu. This mirrors Tauri's default menu but rebinds the
 // "Close Window" item to Cmd/Ctrl+Shift+W, leaving plain Cmd/Ctrl+W free for
 // the in-app "close tab" shortcut handled by the frontend.
@@ -801,6 +812,7 @@ pub fn run() {
             download_and_install_update,
             drain_opened_files,
             drain_quick_note_request,
+            print_webview,
             app_version_info
         ]);
 
