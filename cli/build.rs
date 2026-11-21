@@ -3,6 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Capture the git commit the binary is built from so the TUI help screen can
 /// display detailed version information. Emits `GIT_HASH` (short),
+/// `GIT_HASH_FULL` (used by `install.rs` to spot newer commits),
 /// `GIT_COMMIT_DATE` (YYYY-MM-DD), `GIT_DIRTY` (`clean`/`dirty`/`unknown` —
 /// whether tracked files differed from HEAD at build time), and `BUILD_DATE`
 /// (YYYY-MM-DD, UTC, when `cargo build` ran) as compile-time env vars. Git
@@ -10,10 +11,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// from a source tarball).
 fn main() {
     let hash = git(&["rev-parse", "--short", "HEAD"]);
+    let hash_full = git(&["rev-parse", "HEAD"]);
     let date = git(&["log", "-1", "--format=%cd", "--date=short"]);
     let dirty = git_dirty();
 
     println!("cargo:rustc-env=GIT_HASH={hash}");
+    println!("cargo:rustc-env=GIT_HASH_FULL={hash_full}");
     println!("cargo:rustc-env=GIT_COMMIT_DATE={date}");
     println!("cargo:rustc-env=GIT_DIRTY={dirty}");
     println!("cargo:rustc-env=BUILD_DATE={}", build_date());

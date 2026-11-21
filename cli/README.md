@@ -50,6 +50,24 @@ cd mdcmd/cli
 cargo install --path .
 ```
 
+### Staying up to date
+
+`mdc --version` (and the `?` help / welcome screen) shows where the binary was
+installed from and whether it's behind its source. For a local checkout that
+means new commits under `cli/`, files edited since the build, and upstream
+commits as of the last `git fetch`.
+
+```bash
+mdc --self-update
+```
+
+updates the install the way it was made: for a local checkout it runs
+`git fetch`, fast-forwards if upstream has new commits, then rebuilds
+(`cargo install --path .`, or `cargo build` when run from `target/`). For
+crates.io or `--git` installs it re-runs `cargo install`. On the help/welcome
+screen, `U` does the same and restarts `mdc`, and `C` copies the update
+command.
+
 ## Usage
 
 Launch in the current directory:
@@ -85,6 +103,7 @@ mdc ~/notes
 | `e` | Edit the selected Markdown file in `$EDITOR` |
 | `o` | Open the selected file in the host default GUI app |
 | `y` / `Y` | Copy selected file path / name to clipboard |
+| `U` / `C` | Update & restart / copy update command (help or welcome screen) |
 | `Esc` / `q` | Quit |
 
 ## Configuration

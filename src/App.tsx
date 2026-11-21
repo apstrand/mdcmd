@@ -5,11 +5,14 @@ import FileBrowser from "./components/FileBrowser";
 import MarkdownEditor from "./components/MarkdownEditor";
 import MediaViewer from "./components/MediaViewer";
 import TerminalPane from "./components/TerminalPane";
+import { ContextMenuHost, showContextMenu } from "./components/ContextMenu";
 import { storage, type PathStat } from "./storage";
 import { useDiskChanges, recordPathSignature } from "./hooks/useDiskChanges";
 import { displayRelativePath } from "./utils/paths";
 import { computeLineDiff, diffStats } from "./utils/diff";
-import { FileCode, Loader2, X, AlertCircle, RefreshCw, Copy, FileText, ChevronLeft, Diff, CheckCircle, AlertTriangle } from "lucide-react";
+import { canRevealInOS, parentDir, revealInOS, revealLabel } from "./utils/osIntegration";
+import { textEditingMenuItems } from "./utils/textActions";
+import { FileCode, Loader2, X, AlertCircle, RefreshCw, Copy, FileText, ChevronLeft, Diff, CheckCircle, AlertTriangle, FolderOpen, FolderSearch, XCircle } from "lucide-react";
 
 // True for the desktop (Tauri) build; false for the static web / Dropbox build.
 const isDesktop = storage.id === "tauri";
@@ -657,6 +660,61 @@ export default function App() {
     }
   };
 
+  // Point the file browser at the folder holding `path` (and keep the file
+  // itself selected, so it is highlighted in the listing).
+  const revealInFolderList = (path: string) => {
+    const parent = parentDir(path);
+    if (parent) setCurrentPath(parent);
+  };
+
+  const showInOS = (path: string) => {
+    revealInOS(path).catch((err) => console.error("Failed to reveal path:", err));
+  };
+
+  // Right-click menu for a tab: the actions that apply to the file it holds.
+  const tabMenuItems = (path: string) => {
+    const data = filesData[path];
+    const dirty = !!data && data.savedContent !== data.currentContent;
+    return [
+      {
+        label: "Close tab",
+        icon: <XCircle className="w-3.5 h-3.5" />,
+        onSelect: () => handleCloseTab(path),
+      },
+      {
+        label: "Copy full path",
+        icon: <Copy className="w-3.5 h-3.5" />,
+        separatorBefore: true,
+        onSelect: () => copyToClipboard(path, "path"),
+      },
+      {
+        label: "Copy file name",
+        icon: <FileText className="w-3.5 h-3.5" />,
+        onSelect: () => copyToClipboard(getFileName(path), "name"),
+      },
+      {
+        label: "Show in folder list",
+        icon: <FolderSearch className="w-3.5 h-3.5" />,
+        separatorBefore: true,
+        onSelect: () => revealInFolderList(path),
+      },
+      canRevealInOS && {
+        label: revealLabel,
+        icon: <FolderOpen className="w-3.5 h-3.5" />,
+        onSelect: () => showInOS(path),
+      },
+      dirty && {
+        label: "Show changes",
+        icon: <Diff className="w-3.5 h-3.5" />,
+        separatorBefore: true,
+        onSelect: () => {
+          handleSelectFile(path);
+          setDiffViewOpen(true);
+        },
+      },
+    ];
+  };
+
   // Flash the "Saved" indicator in the tabs bar for a couple seconds.
   const flashSaved = () => {
     setJustSaved(true);
@@ -735,6 +793,26 @@ export default function App() {
     };
     window.addEventListener("keydown", handleCmdW);
     return () => window.removeEventListener("keydown", handleCmdW);
+  }, []);
+
+  // Replace the webview's own context menu (reload / inspect element / "open
+  // link in new window" — none of which mean anything in this app) with the
+  // app's. Components that have something useful to offer handle
+  // `onContextMenu` themselves and mark the event handled; this fallback
+  // catches everything else, offering clipboard actions where there is text
+  // to act on and otherwise just swallowing the click.
+  useEffect(() => {
+    // Only the desktop app owns its whole window; in a browser tab the page's
+    // own menu is the one people expect, so it is left alone there.
+    if (!isDesktop) return;
+    const handleContextMenu = (e: MouseEvent) => {
+      if (e.defaultPrevented) return;
+      e.preventDefault();
+      const target = e.target instanceof Element ? e.target : null;
+      showContextMenu(e, textEditingMenuItems(target));
+    };
+    window.addEventListener("contextmenu", handleContextMenu);
+    return () => window.removeEventListener("contextmenu", handleContextMenu);
   }, []);
 
   // Disable the webview's native zoom, which is far too easy to trigger by
@@ -1006,6 +1084,7 @@ export default function App() {
                     onDragStart={(e) => handleDragStart(e, path)}
                     onDragOver={(e) => handleDragOver(e, path)}
                     onDragEnd={handleDragEnd}
+                    onContextMenu={(e) => showContextMenu(e, tabMenuItems(path))}
                   >
                     <span className="tab-title">{name}</span>
                     {externalChanges[path] && (
@@ -1150,6 +1229,8 @@ export default function App() {
             ) : (
               <MarkdownEditor
                 key={`${selectedFile}#${editorReloadKeys[selectedFile] ?? 0}`}
+                onRevealInFolderList={revealInFolderList}
+                onShowChanges={() => setDiffViewOpen(true)}
                 filePath={selectedFile}
                 pathLabel={displayRelativePath(selectedFile, pinnedShortcuts)}
                 initialContent={filesData[selectedFile]?.currentContent || ""}
@@ -1285,6 +1366,9 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* The app's own right-click menus */}
+      <ContextMenuHost />
 
       {/* Disk-vs-buffer comparison opened from the outside-change banner */}
       {externalDiffOpen && externalDiskContent !== undefined && (
