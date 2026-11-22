@@ -40,6 +40,7 @@ import {
   Diff,
   Wand2,
   Printer,
+  Link as LinkIcon,
 } from "lucide-react";
 import { rtlTruncate } from "../utils/paths";
 import { showContextMenu } from "./ContextMenu";
@@ -356,6 +357,15 @@ export default function MarkdownEditor({
     findStateRef.current = findState;
   }, [findState]);
 
+  // The small "set link" popover (Cmd+K), anchored under the selection.
+  const [linkEditor, setLinkEditor] = useState<{
+    open: boolean;
+    url: string;
+    top: number;
+    left: number;
+  }>({ open: false, url: "", top: 0, left: 0 });
+  const linkInputRef = useRef<HTMLInputElement>(null);
+
   // Round-tripping markdown through the rich editor is lossy in cosmetic ways
   // (list markers, escaping, blank lines), so the serialized text of a file
   // nobody has touched rarely matches the bytes on disk. Comparing against this
@@ -586,12 +596,33 @@ export default function MarkdownEditor({
     
     if (editMode === "rich" && editor) {
       setFindState(prev => ({ ...prev, currentMatchIndex: index }));
-      
+
       const tr = editor.state.tr;
       const resolvedPos = tr.doc.resolve(match.from);
       tr.setSelection(new TextSelection(resolvedPos, tr.doc.resolve(match.to)));
       tr.scrollIntoView();
       editor.view.dispatch(tr);
+
+      // ProseMirror's own scrollIntoView only fires reliably when the editor
+      // holds focus — but during Find the focus is in the search box, so it's a
+      // no-op and the match stays off-screen. Scroll the container to the match
+      // ourselves, after a frame so the new selection has been laid out.
+      requestAnimationFrame(() => {
+        const el = editorContainerRef.current;
+        if (!el || !editor) return;
+        try {
+          const coords = editor.view.coordsAtPos(match.from);
+          const box = el.getBoundingClientRect();
+          const margin = 80;
+          if (coords.top < box.top + margin) {
+            el.scrollTop += coords.top - (box.top + margin);
+          } else if (coords.bottom > box.bottom - margin) {
+            el.scrollTop += coords.bottom - (box.bottom - margin);
+          }
+        } catch {
+          // coordsAtPos can throw mid-update; the next navigation will retry.
+        }
+      });
     } else {
       const textarea = document.querySelector(".plain-text-editor") as HTMLTextAreaElement;
       if (textarea) {
@@ -603,6 +634,53 @@ export default function MarkdownEditor({
         }
       }
     }
+  };
+
+  // Open the Cmd+K link popover for the current selection. Needs selected text
+  // to wrap (or the caret inside an existing link, to edit it); otherwise there
+  // is nothing to turn into a link. Pre-fills any existing href and anchors the
+  // input just below the selection.
+  const openLinkEditor = () => {
+    if (editMode !== "rich" || !editor) return;
+    const { from, to } = editor.state.selection;
+    const existingHref: string = editor.getAttributes("link").href || "";
+    if (from === to && !existingHref) return;
+
+    let top = 0;
+    let left = 0;
+    try {
+      const start = editor.view.coordsAtPos(from);
+      const end = editor.view.coordsAtPos(to);
+      top = Math.max(start.bottom, end.bottom) + 6;
+      left = start.left;
+    } catch {
+      // Fall back to the top-left if the selection can't be measured.
+    }
+    setLinkEditor({ open: true, url: existingHref, top, left });
+    requestAnimationFrame(() => {
+      linkInputRef.current?.focus();
+      linkInputRef.current?.select();
+    });
+  };
+
+  const closeLinkEditor = () => {
+    setLinkEditor((prev) => ({ ...prev, open: false }));
+    editor?.commands.focus();
+  };
+
+  // Apply the typed/pasted URL to the stored selection (a blank URL removes the
+  // link). `extendMarkRange` lets an edit from inside an existing link cover the
+  // whole link even without a selection.
+  const applyLinkEditor = () => {
+    if (!editor) return;
+    const url = linkEditor.url.trim();
+    const chain = editor.chain().focus().extendMarkRange("link");
+    if (url) {
+      chain.setLink({ href: url }).run();
+    } else {
+      chain.unsetLink().run();
+    }
+    setLinkEditor((prev) => ({ ...prev, open: false }));
   };
 
   const handleSearchChange = (query: string) => {
@@ -873,6 +951,11 @@ export default function MarkdownEditor({
     handlePrintRef.current = handlePrint;
   });
 
+  const openLinkEditorRef = useRef(openLinkEditor);
+  useEffect(() => {
+    openLinkEditorRef.current = openLinkEditor;
+  });
+
   // Keyboard shortcut Ctrl+S / Cmd+S for saving, Cmd+F for find, Cmd+G for find next, Cmd+Shift+G for find prev,
   // Cmd+` to toggle between rich text and plain text editing.
   useEffect(() => {
@@ -889,6 +972,9 @@ export default function MarkdownEditor({
       } else if (isCmd && key === "p" && !e.shiftKey && !e.altKey) {
         e.preventDefault();
         handlePrintRef.current();
+      } else if (isCmd && key === "k" && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        openLinkEditorRef.current();
       } else if (isCmd && key === "f") {
         e.preventDefault();
         setFindState(prev => {
@@ -1163,6 +1249,13 @@ export default function MarkdownEditor({
             >
               <Code className="w-4 h-4" />
             </button>
+            <button
+              onClick={openLinkEditor}
+              className={`toolbar-btn ${editor.isActive("link") ? "active" : ""}`}
+              title="Add Link (Cmd+K)"
+            >
+              <LinkIcon className="w-4 h-4" />
+            </button>
 
             <div className="toolbar-divider" />
 
@@ -1336,6 +1429,60 @@ export default function MarkdownEditor({
             </button>
           </div>
         </div>
+      )}
+
+      {linkEditor.open && (
+        <>
+          {/* Click-away layer to dismiss the popover. */}
+          <div
+            onMouseDown={closeLinkEditor}
+            style={{ position: "fixed", inset: 0, zIndex: 50 }}
+          />
+          <div
+            style={{
+              position: "fixed",
+              top: linkEditor.top,
+              left: linkEditor.left,
+              zIndex: 51,
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+              background: "var(--bg-primary)",
+              border: "1px solid var(--border)",
+              borderRadius: "6px",
+              padding: "6px 8px",
+              boxShadow: "0 4px 16px rgba(0,0,0,0.18)",
+            }}
+          >
+            <LinkIcon
+              className="w-3.5 h-3.5"
+              style={{ color: "var(--text-secondary)", flexShrink: 0 }}
+            />
+            <input
+              ref={linkInputRef}
+              className="find-replace-input"
+              placeholder="Paste or type a link…"
+              value={linkEditor.url}
+              onChange={(e) => {
+                const v = e.target.value;
+                setLinkEditor((prev) => ({ ...prev, url: v }));
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  applyLinkEditor();
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  closeLinkEditor();
+                }
+              }}
+              style={{ width: "240px" }}
+            />
+            <button className="find-replace-btn" onClick={applyLinkEditor}>
+              Apply
+            </button>
+          </div>
+        </>
       )}
 
       <div
