@@ -1028,22 +1028,6 @@ export default function MarkdownEditor({
     return () => window.removeEventListener("keydown", handleZoomKeys);
   }, []);
 
-  // Ctrl/Cmd + mouse wheel (or trackpad pinch, which browsers report as a
-  // ctrlKey wheel event) zooms the content area. React's onWheel is passive, so
-  // attach a native non-passive listener to allow preventDefault.
-  useEffect(() => {
-    const el = editorContainerRef.current;
-    if (!el) return;
-    const onWheel = (e: WheelEvent) => {
-      if (!(e.ctrlKey || e.metaKey)) return;
-      e.preventDefault();
-      const delta = e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP;
-      setZoom((z) => clampZoom(z + delta));
-    };
-    el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
-  }, []);
-
   if (isMarkdown && !editor) {
     return (
       <div style={{ display: "flex", flexGrow: 1, alignItems: "center", justifyContent: "center", color: "var(--text-secondary)" }}>
@@ -1167,7 +1151,7 @@ export default function MarkdownEditor({
             </div>
           )}
 
-          <div className="zoom-controls" title="Zoom (Cmd/Ctrl +/-/0, Cmd/Ctrl + scroll)">
+          <div className="zoom-controls" title="Zoom (Cmd/Ctrl +/-/0)">
             <button className="zoom-btn" onClick={zoomOut} title="Zoom out" aria-label="Zoom out">
               <ZoomOut className="w-4 h-4" />
             </button>
