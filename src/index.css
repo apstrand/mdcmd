@@ -869,6 +869,12 @@ body {
   display: flex;
   flex-direction: column;
   flex-grow: 1;
+  /* As a flex item in the centering row, the wrapper's automatic minimum size
+     is its content's intrinsic width — a wide table would push the "page" box
+     past its max-width and spill content outside the border. min-width:0 pins
+     it to max-width so wide content stays inside and scrolls (see the table's
+     own overflow-x below) instead of overflowing the outline. */
+  min-width: 0;
   /* min-height (not height) so the bordered "page" box grows past the
      viewport as content is added, instead of clipping at the container's
      height while text overflows past its visible boundary. */

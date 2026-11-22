@@ -13,20 +13,17 @@ const md = new MarkdownIt({
 const ROOT_ID = "mdcmd-print-root";
 const STYLE_ID = "mdcmd-print-style";
 
-/** Per-theme page geometry and body type, matching the in-app reading themes. */
-const THEMES: Record<ContentTheme, { maxWidth: string; bodyFont: string; lineHeight: string }> = {
+/** Per-theme body type, mirroring the in-app reading themes. */
+const THEMES: Record<ContentTheme, { bodyFont: string; lineHeight: string }> = {
   default: {
-    maxWidth: "46rem",
     bodyFont: `-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif`,
     lineHeight: "1.55",
   },
   reading: {
-    maxWidth: "40rem",
     bodyFont: `Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif`,
     lineHeight: "1.75",
   },
   clarity: {
-    maxWidth: "52rem",
     bodyFont: `-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif`,
     lineHeight: "1.5",
   },
@@ -55,7 +52,10 @@ function printStyles(theme: ContentTheme): string {
   ${r} { display: block !important; color: #1a1a1a; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 
   ${r} .mdcmd-print-page {
-    max-width: ${t.maxWidth}; margin: 0 auto;
+    /* Fill the printable width; the page's own @page margins are the only
+       inset. No centered max-width — that stranded content behind a big left
+       gap on wide paper. */
+    width: 100%; margin: 0;
     font-family: ${t.bodyFont}; line-height: ${t.lineHeight}; font-size: 11.5pt;
   }
   ${r} h1, ${r} h2, ${r} h3, ${r} h4, ${r} h5, ${r} h6 {
