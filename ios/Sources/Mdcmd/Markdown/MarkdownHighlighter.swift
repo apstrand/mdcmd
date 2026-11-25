@@ -83,6 +83,15 @@ struct MarkdownHighlighter {
     }
 
     private func styleBlock(_ storage: NSTextStorage, _ ns: NSString, line: String, lineRange: NSRange) {
+        // GFM table delimiter row (`| --- | :--: |`): nothing but pipes, dashes,
+        // colons and spaces, with at least one dash. Dim it as structural syntax.
+        if line.contains("|"),
+            line.range(of: "^\\s*\\|?[ :|-]*-[ :|-]*$", options: .regularExpression) != nil {
+            storage.addAttribute(.font, value: monoFont, range: lineRange)
+            dim(storage, lineRange)
+            return
+        }
+
         // ATX headings: leading #'s.
         if let hash = line.range(of: "^#{1,6}\\s", options: .regularExpression) {
             let level = line.distance(from: line.startIndex, to: line.firstIndex(where: { $0 != "#" }) ?? line.startIndex)

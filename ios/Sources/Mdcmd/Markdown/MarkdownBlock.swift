@@ -7,6 +7,12 @@ struct ListItem {
     let checked: Bool?
 }
 
+/// Column alignment for a GFM pipe table, read from its delimiter row
+/// (`:---` left, `:---:` center, `---:` right, `---` unset).
+enum ColumnAlignment {
+    case left, center, right, none
+}
+
 /// A coarse block-level Markdown element. A deliberately small grammar covering
 /// the constructs the editor produces; inline emphasis/links are handled later
 /// by `AttributedString(markdown:)` in the preview.
@@ -19,6 +25,7 @@ enum MarkdownBlock {
     case code(String)
     case rule
     case image(alt: String, path: String)
+    case table(header: [String], alignments: [ColumnAlignment], rows: [[String]])
 
     /// Split Markdown source into blocks.
     static func parse(_ source: String) -> [MarkdownBlock] {
@@ -76,6 +83,25 @@ enum MarkdownBlock {
                 let text = String(trimmed[m.upperBound...])
                 blocks.append(.heading(level: level, text: text))
                 i += 1
+                continue
+            }
+
+            // GFM pipe table: a header row (contains `|`) immediately followed
+            // by a delimiter row (`| --- | :--: |`). The delimiter is what
+            // distinguishes a table from a paragraph that happens to use pipes.
+            if trimmed.contains("|"), i + 1 < lines.count,
+                let alignments = parseDelimiterRow(lines[i + 1]) {
+                flushParagraph(&paragraph)
+                let header = splitTableRow(trimmed)
+                i += 2
+                var rows: [[String]] = []
+                while i < lines.count {
+                    let l = lines[i].trimmingCharacters(in: .whitespaces)
+                    if l.isEmpty || !l.contains("|") { break }
+                    rows.append(splitTableRow(l))
+                    i += 1
+                }
+                blocks.append(.table(header: header, alignments: alignments, rows: rows))
                 continue
             }
 
@@ -145,6 +171,55 @@ enum MarkdownBlock {
             return ListItem(text: String(text[r.upperBound...]), checked: checked)
         }
         return ListItem(text: text, checked: nil)
+    }
+
+    /// Parse a table delimiter row into column alignments, or `nil` if the line
+    /// isn't one. Requires at least one `|` so a paragraph followed by a `---`
+    /// horizontal rule isn't mistaken for a (one-column) table.
+    private static func parseDelimiterRow(_ line: String) -> [ColumnAlignment]? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.contains("|"), trimmed.contains("-") else { return nil }
+        let cells = splitTableRow(trimmed)
+        guard !cells.isEmpty else { return nil }
+        var alignments: [ColumnAlignment] = []
+        for cell in cells {
+            guard cell.range(of: "^:?-+:?$", options: .regularExpression) != nil else { return nil }
+            switch (cell.hasPrefix(":"), cell.hasSuffix(":")) {
+            case (true, true): alignments.append(.center)
+            case (true, false): alignments.append(.left)
+            case (false, true): alignments.append(.right)
+            default: alignments.append(.none)
+            }
+        }
+        return alignments
+    }
+
+    /// Split a table row on unescaped `|`, trimming cells and dropping the empty
+    /// leading/trailing cells produced by the outer pipes. `\|` becomes a literal
+    /// pipe (matching the web serializer's escaping in `markdownTable.ts`).
+    private static func splitTableRow(_ line: String) -> [String] {
+        var cells: [String] = []
+        var current = ""
+        var escaped = false
+        for ch in line.trimmingCharacters(in: .whitespaces) {
+            if escaped {
+                if ch == "|" { current.append("|") } else { current.append("\\"); current.append(ch) }
+                escaped = false
+            } else if ch == "\\" {
+                escaped = true
+            } else if ch == "|" {
+                cells.append(current)
+                current = ""
+            } else {
+                current.append(ch)
+            }
+        }
+        if escaped { current.append("\\") }
+        cells.append(current)
+        var trimmed = cells.map { $0.trimmingCharacters(in: .whitespaces) }
+        if trimmed.first == "" { trimmed.removeFirst() }
+        if trimmed.last == "" { trimmed.removeLast() }
+        return trimmed
     }
 
     private static func parseImage(_ line: String) -> (alt: String, path: String)? {

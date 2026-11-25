@@ -99,6 +99,72 @@ struct MarkdownPreview: View {
 
         case .image(let alt, let path):
             imageView(alt: alt, path: path)
+
+        case .table(let header, let alignments, let rows):
+            tableView(header: header, alignments: alignments, rows: rows)
+        }
+    }
+
+    @ViewBuilder
+    private func tableView(header: [String], alignments: [ColumnAlignment], rows: [[String]]) -> some View {
+        let columns = max(header.count, alignments.count, rows.map(\.count).max() ?? 0)
+        ScrollView(.horizontal, showsIndicators: false) {
+            Grid(alignment: .topLeading, horizontalSpacing: 0, verticalSpacing: 0) {
+                GridRow {
+                    ForEach(0..<columns, id: \.self) { col in
+                        cell(text: at(header, col) ?? "", alignment: at(alignments, col) ?? .none, isHeader: true)
+                    }
+                }
+                ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                    Divider().gridCellColumns(columns)
+                    GridRow {
+                        ForEach(0..<columns, id: \.self) { col in
+                            cell(text: at(row, col) ?? "", alignment: at(alignments, col) ?? .none, isHeader: false)
+                        }
+                    }
+                }
+            }
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(.separator), lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    @ViewBuilder
+    private func cell(text: String, alignment: ColumnAlignment, isHeader: Bool) -> some View {
+        // Cells may hold `<br>` hard breaks (see the web serializer); show them
+        // as line breaks rather than literal tags.
+        let normalized = text.replacingOccurrences(
+            of: "<br ?/?>", with: "\n", options: .regularExpression)
+        inline(normalized)
+            .font(.system(size: fontSize, weight: isHeader ? .semibold : .regular))
+            .lineSpacing(lineSpacing * 0.5)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: frameAlignment(alignment))
+            .multilineTextAlignment(textAlignment(alignment))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(isHeader ? Color(.secondarySystemBackground) : Color.clear)
+    }
+
+    /// Bounds-checked element access, so ragged rows (fewer cells than columns)
+    /// render blank padding cells instead of trapping.
+    private func at<T>(_ array: [T], _ index: Int) -> T? {
+        index >= 0 && index < array.count ? array[index] : nil
+    }
+
+    private func frameAlignment(_ a: ColumnAlignment) -> Alignment {
+        switch a {
+        case .center: return .center
+        case .right: return .trailing
+        default: return .leading
+        }
+    }
+
+    private func textAlignment(_ a: ColumnAlignment) -> TextAlignment {
+        switch a {
+        case .center: return .center
+        case .right: return .trailing
+        default: return .leading
         }
     }
 
