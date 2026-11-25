@@ -782,6 +782,60 @@ export default function App() {
     handleSaveAllRef.current = handleSaveAll;
   });
 
+  // Desktop File menu (built natively in Rust): its items fire events here so
+  // Open/Save share the same logic as the in-app UI. The native accelerators
+  // (Cmd+O/Shift+O/S) take over from the webview on desktop; the editor's own
+  // Cmd+S listener still runs on web/iOS, where there is no native menu.
+  const handleSaveFileRef = useRef(handleSaveFile);
+  handleSaveFileRef.current = handleSaveFile;
+  useEffect(() => {
+    if (storage.id !== "tauri") return;
+    let unlisteners: Array<() => void> = [];
+    let cancelled = false;
+
+    const saveActive = () => {
+      const path = selectedFileRef.current;
+      const data = path ? filesDataRef.current[path] : undefined;
+      if (path && data) handleSaveFileRef.current(path, data.currentContent).catch(() => {});
+    };
+    const openFile = async () => {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const selected = await open({
+        multiple: false,
+        directory: false,
+        filters: [
+          { name: "Markdown & Text", extensions: ["md", "qmd", "markdown", "txt"] },
+          { name: "All Files", extensions: ["*"] },
+        ],
+      });
+      if (typeof selected === "string") handleSelectFileRef.current(selected);
+    };
+    const openFolder = async () => {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const selected = await open({ multiple: false, directory: true });
+      if (typeof selected === "string") setCurrentPath(selected);
+    };
+
+    import("@tauri-apps/api/event")
+      .then(({ listen }) =>
+        Promise.all([
+          listen("menu-open-file", () => void openFile().catch(() => {})),
+          listen("menu-open-folder", () => void openFolder().catch(() => {})),
+          listen("menu-save", () => saveActive()),
+        ]),
+      )
+      .then((us) => {
+        if (cancelled) us.forEach((u) => u());
+        else unlisteners = us;
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+      unlisteners.forEach((u) => u());
+    };
+  }, []);
+
   // Keyboard shortcut Cmd+W / Ctrl+W to close the active tab
   useEffect(() => {
     const handleCmdW = (e: KeyboardEvent) => {

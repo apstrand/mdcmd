@@ -29,13 +29,20 @@ const alignAttribute = {
   },
 };
 
+// Pin cells to a single paragraph of inline content (the extension's default is
+// `block+`). This is a deliberate feature limit: it stops Enter from splitting a
+// cell into two paragraphs and blocks lists/headings/code inside a cell — exactly
+// the edits that make a table stop fitting pipe syntax and force the serializer
+// to fall back to an HTML table. One paragraph per cell keeps the markdown clean.
 const AlignedTableCell = TableCell.extend({
+  content: "paragraph",
   addAttributes() {
     return { ...this.parent?.(), ...alignAttribute };
   },
 });
 
 const AlignedTableHeader = TableHeader.extend({
+  content: "paragraph",
   addAttributes() {
     return { ...this.parent?.(), ...alignAttribute };
   },

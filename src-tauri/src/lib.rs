@@ -715,6 +715,22 @@ fn build_app_menu<R: tauri::Runtime>(
         .accelerator("CmdOrCtrl+Shift+W")
         .build(app)?;
 
+    // File items emit events to the focused window (see `on_menu_event`); the
+    // dialogs and the actual save run on the frontend, next to the open-file /
+    // folder / save logic they share with the in-app UI.
+    let open_file = MenuItemBuilder::new("Open File…")
+        .id("open_file")
+        .accelerator("CmdOrCtrl+O")
+        .build(app)?;
+    let open_folder = MenuItemBuilder::new("Open Folder…")
+        .id("open_folder")
+        .accelerator("CmdOrCtrl+Shift+O")
+        .build(app)?;
+    let save_file = MenuItemBuilder::new("Save")
+        .id("save_file")
+        .accelerator("CmdOrCtrl+S")
+        .build(app)?;
+
     let app_menu = SubmenuBuilder::new(app, "App")
         .about(Some(AboutMetadata::default()))
         .separator()
@@ -725,6 +741,13 @@ fn build_app_menu<R: tauri::Runtime>(
         .show_all()
         .separator()
         .quit()
+        .build()?;
+
+    let file_menu = SubmenuBuilder::new(app, "File")
+        .item(&open_file)
+        .item(&open_folder)
+        .separator()
+        .item(&save_file)
         .build()?;
 
     let edit_menu = SubmenuBuilder::new(app, "Edit")
@@ -745,7 +768,7 @@ fn build_app_menu<R: tauri::Runtime>(
         .build()?;
 
     MenuBuilder::new(app)
-        .items(&[&app_menu, &edit_menu, &window_menu])
+        .items(&[&app_menu, &file_menu, &edit_menu, &window_menu])
         .build()
 }
 
@@ -775,19 +798,28 @@ pub fn run() {
     let builder = builder
         .menu(build_app_menu)
         .on_menu_event(|app, event| {
-            use tauri::Manager;
+            use tauri::{Emitter, Manager};
+            // The app-wide menu acts on whichever window has focus.
+            let Some(window) = app
+                .webview_windows()
+                .into_values()
+                .find(|w| w.is_focused().unwrap_or(false))
+            else {
+                return;
+            };
             if event.id() == "close_window" {
-                if let Some(window) = app
-                    .webview_windows()
-                    .values()
-                    .find(|w| w.is_focused().unwrap_or(false))
-                {
-                    let _ = window.close();
-                }
+                let _ = window.close();
+            } else if event.id() == "open_file" {
+                let _ = window.emit("menu-open-file", ());
+            } else if event.id() == "open_folder" {
+                let _ = window.emit("menu-open-folder", ());
+            } else if event.id() == "save_file" {
+                let _ = window.emit("menu-save", ());
             }
         })
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
         .manage(PtyState::default())
         .invoke_handler(tauri::generate_handler![
             get_home_dir,
