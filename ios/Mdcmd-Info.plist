@@ -8,6 +8,13 @@
   <key>CFBundleDisplayName</key>
   <string>MarkDown Commander</string>
 
+  <!-- The app uses only standard HTTPS/TLS (GitHub API, image loads), which is
+       exempt from US export encryption rules. Declaring this here skips the
+       "Missing Compliance" prompt that otherwise blocks every TestFlight build
+       from releasing automatically. -->
+  <key>ITSAppUsesNonExemptEncryption</key>
+  <false/>
+
   <!-- Edit Markdown/text files opened from Files / iCloud Drive / Dropbox /
        Google Drive in place (edits the original), mirroring the Tauri app. -->
   <key>LSSupportsOpeningDocumentsInPlace</key>
